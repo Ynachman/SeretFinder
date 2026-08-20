@@ -1,0 +1,20 @@
+# --- Web framework ---------------------------------------------------------
+fastapi
+uvicorn[standard]
+
+# --- Database & ORM ---------------------------------------------------------
+sqlalchemy
+psycopg2-binary
+pgvector
+
+# --- Scraping ----------------------------------------------------------------
+playwright
+beautifulsoup4
+requests
+
+# --- Configuration ------------------------------------------------------------
+pydantic-settings
+
+# --- Timezones ------------------------------------------------------------------
+# Provides the IANA timezone database on Windows (used by zoneinfo for Asia/Jerusalem)
+tzdata
