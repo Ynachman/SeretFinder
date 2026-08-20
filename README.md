@@ -26,8 +26,10 @@ SeretFinder/
 
 - **Python 3.11+** — verify with `python --version` (the `py` launcher is
   preferred on Windows)
-- **PostgreSQL 14+** with the `vector` extension available (installed by
-  default in the official Docker image `pgvector/pgvector`)
+- A **[Neon](https://neon.tech)** account (free tier) — SeretFinder uses
+  cloud-hosted Postgres rather than a local install. Neon's Postgres images
+  ship the `vector` extension, so no separate pgvector setup is needed beyond
+  running `CREATE EXTENSION` (the app does this automatically on startup).
 
 ## 🪟 Setup on Windows (PowerShell)
 
@@ -56,11 +58,16 @@ playwright install chromium
 
 ### Creating the `.env` file
 
-Copy the template below into a file named `.env` in the project root:
+Copy the template below into a file named `.env` in the project root (or edit
+`init.env`, which is read the same way):
 
 ```dotenv
-# PostgreSQL (psycopg2 dialect)
-DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/seretfinder
+# PostgreSQL (psycopg2 dialect) — Neon connection string, with sslmode=require.
+# Get this from the Neon console: Project -> Connect -> "Connection string".
+# Neon gives you a *pooled* connection string (host contains "-pooler") for
+# app traffic, and a direct one for migrations/admin work — the pooled one is
+# fine here.
+DATABASE_URL=postgresql+psycopg2://<user>:<password>@<project>-pooler.<region>.aws.neon.tech/<dbname>?sslmode=require
 
 # TMDB (https://www.themoviedb.org/settings/api)
 TMDB_API_KEY=your_tmdb_api_key
@@ -78,12 +85,19 @@ CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 
 ## 🗄️ Preparing the database
 
-```sql
-CREATE DATABASE seretfinder;
-```
+1. Sign up at [neon.tech](https://neon.tech) (free tier is enough for this
+   project) and create a new project — this provisions a default database
+   and gives you a connection string immediately.
+2. Copy the connection string into `DATABASE_URL` in `.env` / `init.env` as
+   shown above. Make sure it uses the `postgresql+psycopg2://` scheme (Neon's
+   console shows a plain `postgresql://` URL — just prepend `+psycopg2`) and
+   keeps `?sslmode=require`.
+3. That's it — the `vector` extension and all tables (`movies`, `cinemas`,
+   `showtimes`) are created automatically the first time the API starts, via
+   `backend/database.py`'s `enable_vector_extension()` and
+   `Base.metadata.create_all()`.
 
-The `vector` extension and all tables (`movies`, `cinemas`, `showtimes`) are
-created automatically when the API starts.
+No local Postgres install, Docker container, or `psql` session is required.
 
 ## 🚀 Running the application
 

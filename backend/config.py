@@ -14,8 +14,10 @@ class Settings(BaseSettings):
     """Typed access to every runtime configuration value used by the app."""
 
     # --- Database ------------------------------------------------------------
-    # PostgreSQL connection string (psycopg2 dialect), for example:
-    #   postgresql+psycopg2://user:password@localhost:5432/seretfinder
+    # PostgreSQL connection string (psycopg2 dialect). SeretFinder targets a
+    # cloud-hosted Postgres (Neon) rather than a local instance, e.g.:
+    #   postgresql+psycopg2://user:password@ep-xyz-pooler.us-east-2.aws.neon.tech/seretfinder?sslmode=require
+    # This default is a local fallback only; override it via .env/init.env.
     database_url: str = (
         "postgresql+psycopg2://postgres:postgres@localhost:5432/seretfinder"
     )
