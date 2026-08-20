@@ -568,6 +568,11 @@ async def main(argv: list[str] | None = None) -> None:
         default="test_scrape.json",
         help="Output JSON file path (default: test_scrape.json).",
     )
+    parser.add_argument(
+        "--to-db",
+        action="store_true",
+        help="Also upsert scraped records into Postgres (see scraper.ingest).",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -597,6 +602,8 @@ async def main(argv: list[str] | None = None) -> None:
     if args.all:
         records = await indexer.run(output=Path(args.output))
         logger.info("Total unique showtime records scraped: %d", len(records))
+        if args.to_db:
+            _ingest_to_db(records)
         return
 
     # --- Single-movie test scrape ------------------------------------------------
@@ -642,6 +649,22 @@ async def main(argv: list[str] | None = None) -> None:
             "No showtime records parsed. If the selectors drifted, run again with "
             "--headed to watch the browser, or pass --movie-url for a specific page."
         )
+
+    if args.to_db:
+        _ingest_to_db(records)
+
+
+def _ingest_to_db(records: list[ShowtimeRecord]) -> None:
+    """Upsert ``records`` into Postgres via :mod:`scraper.ingest` (lazy import
+    so plain JSON-only scrapes never need a working DB connection)."""
+    from backend.database import SessionLocal
+    from .ingest import ingest_records
+
+    session = SessionLocal()
+    try:
+        ingest_records(records, session)
+    finally:
+        session.close()
 
 
 if __name__ == "__main__":
