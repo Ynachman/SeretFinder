@@ -103,9 +103,14 @@ class SeretIndexer:
 
     # --- Showtime blocks (shared by the modal and the raw AJAX endpoint) --------
     #: One full cinema card, grouping a cinema's day-by-day showtimes.
-    CINEMA_BLOCK_SELECTOR = ".cardGray"
+    #: ``article.mvt`` is the current layout; ``.cardGray`` is the legacy one.
+    CINEMA_BLOCK_SELECTOR = "article.mvt, .cardGray"
+    #: Current layout: the city heading sits on the ``section.mvf-city`` that
+    #: wraps one or more cinema articles.
+    CITY_ANCESTOR_SELECTOR = "xpath=ancestor::section[contains(@class,'mvf-city')]//h3"
     #: Candidate selectors for the cinema name inside a card (first hit wins).
     CINEMA_NAME_CANDIDATES = [
+        "a.mvt-n",
         "a.TitGreen20",
         ".cinemaname",
         ".cinema-name",
@@ -128,6 +133,9 @@ class SeretIndexer:
 
     #: The raw AJAX endpoint that powers the on-page showtimes modal.
     SHOWTIMES_AJAX_PATH = "/movies/showTimesAjaxMovies.asp"
+
+    #: How many times to try loading the movies index before giving up.
+    INDEX_ATTEMPTS = 3
 
     def __init__(
         self,
@@ -214,19 +222,34 @@ class SeretIndexer:
         if self._page is None:
             raise RuntimeError("Call start() before collecting links")
 
-        try:
-            await self._page.goto(listing_url, wait_until="domcontentloaded", timeout=self._timeout_ms)
-            # Wait for the movie grid anchors to be present in the DOM. We must
-            # wait for "attached", not "visible": the first matching anchor on
-            # Seret is a hidden duplicate, so the visible-state wait never fires.
-            await self._page.wait_for_selector(
-                self.MOVIE_LINK_SELECTOR, state="attached", timeout=self._timeout_ms
+        # The site (behind Cloudflare) is occasionally slow or serves a
+        # challenge page; retry a few times before giving up.
+        last_error = ""
+        for attempt in range(1, self.INDEX_ATTEMPTS + 1):
+            try:
+                await self._page.goto(
+                    listing_url, wait_until="domcontentloaded", timeout=self._timeout_ms
+                )
+                # Wait for the movie grid anchors to be present in the DOM. We must
+                # wait for "attached", not "visible": the first matching anchor on
+                # Seret is a hidden duplicate, so the visible-state wait never fires.
+                await self._page.wait_for_selector(
+                    self.MOVIE_LINK_SELECTOR, state="attached", timeout=self._timeout_ms
+                )
+                last_error = ""
+                break
+            except PlaywrightTimeoutError:
+                last_error = "timed out waiting for the movie grid"
+            except PlaywrightError as exc:
+                last_error = f"failed to load the page: {exc}"
+            logger.warning(
+                "Movies index attempt %d/%d: %s", attempt, self.INDEX_ATTEMPTS, last_error
             )
-        except PlaywrightTimeoutError:
-            logger.error("Timed out waiting for the movie grid on %s", listing_url)
-            return []
-        except PlaywrightError as exc:
-            logger.error("Failed to load the movies index %s: %s", listing_url, exc)
+            if attempt < self.INDEX_ATTEMPTS:
+                await asyncio.sleep(3 * attempt)
+        if last_error:
+            logger.error("Giving up on %s: %s", listing_url, last_error)
+            await self._dump_debug("index_timeout")
             return []
 
         try:
@@ -243,6 +266,22 @@ class SeretIndexer:
             unique = unique[: self._max_movies]
         logger.info("Collected %d movie URLs from %s", len(unique), listing_url)
         return unique
+
+    async def _dump_debug(self, label: str) -> None:
+        """Save a screenshot and the page HTML to ``debug/`` for diagnosis."""
+        if self._page is None:
+            return
+        out = Path("debug")
+        try:
+            out.mkdir(exist_ok=True)
+            await self._page.screenshot(path=str(out / f"{label}.png"))
+            (out / f"{label}.html").write_text(await self._page.content(), encoding="utf-8")
+            logger.error(
+                "Saved %s.png/.html to %s (url=%s, title=%r)",
+                label, out.resolve(), self._page.url, await self._page.title(),
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnostics must never raise
+            logger.warning("Could not save debug artifacts: %s", exc)
 
     # --- Step 2: per-movie scraping -------------------------------------------------
     async def scrape_movie(self, movie_url: str) -> list[ShowtimeRecord]:
@@ -362,7 +401,9 @@ class SeretIndexer:
     async def _parse_cinema_card(self, card: Locator, hebrew_title: str) -> list[ShowtimeRecord]:
         """Parse one cinema card into its individual showtime records."""
         cinema_name = await self._first_text(card, self.CINEMA_NAME_CANDIDATES)
-        city = await self._first_text(card, [".cityname"])
+        city = await self._first_text(card, [".cityname"]) or await self._first_text(
+            card, [self.CITY_ANCESTOR_SELECTOR]
+        )
         fallback_day_label = await self._first_text(card, [".dayname"])
 
         daylines = await card.locator(self.DAYLINE_SELECTOR).all()
@@ -502,14 +543,20 @@ class SeretIndexer:
             await self.stop()
 
         # Enrich each unique record with TMDB metadata (blocking, done once).
+        # One TMDB lookup per distinct title (not per showtime).
+        tmdb_cache: dict[str, dict[str, Any]] = {}
         for record in self._dedupe(records):
             try:
-                tmdb = fetch_tmdb_metadata(record.movie_title, language=self.language)
+                if record.movie_title not in tmdb_cache:
+                    tmdb_cache[record.movie_title] = fetch_tmdb_metadata(
+                        record.movie_title, language=self.language
+                    )
+                tmdb = tmdb_cache[record.movie_title]
                 if tmdb:
                     if record.tmdb:
                         record.tmdb.update(tmdb)
                     else:
-                        record.tmdb = tmdb
+                        record.tmdb = dict(tmdb)
             except Exception as exc:  # noqa: BLE001 - enrichment must never abort the run
                 logger.warning("TMDB enrichment failed for %r: %s", record.movie_title, exc)
 
@@ -657,8 +704,13 @@ async def main(argv: list[str] | None = None) -> None:
 def _ingest_to_db(records: list[ShowtimeRecord]) -> None:
     """Upsert ``records`` into Postgres via :mod:`scraper.ingest` (lazy import
     so plain JSON-only scrapes never need a working DB connection)."""
-    from backend.database import SessionLocal
+    from backend import models  # noqa: F401  (registers tables on Base.metadata)
+    from backend.database import Base, SessionLocal, engine, enable_vector_extension
     from .ingest import ingest_records
+
+    # Ensure the schema exists even if the API has never been started.
+    enable_vector_extension()
+    Base.metadata.create_all(bind=engine)
 
     session = SessionLocal()
     try:

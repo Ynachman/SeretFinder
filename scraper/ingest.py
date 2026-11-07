@@ -13,7 +13,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -33,10 +33,22 @@ def ingest_records(records: Iterable[ShowtimeRecord], session: Session) -> int:
     logged and skipped so the rest of the batch still lands.
     """
     written = 0
+    # Per-run caches: the DB is remote, so avoid a round trip per record.
+    movies: dict[str, Movie] = {}
+    cinemas: dict[tuple[str, Optional[str]], Cinema] = {}
+    #: Existing showtime -> row, loaded lazily once per movie.
+    slots: dict[tuple, Showtime] = {}
+    loaded_movies: set[int] = set()
+
     for record in records:
         try:
-            movie = _get_or_create_movie(session, record)
-            cinema = _get_or_create_cinema(session, record)
+            movie = movies.get(record.movie_title)
+            if movie is None:
+                movie = movies[record.movie_title] = _get_or_create_movie(session, record)
+            ckey = (record.cinema_name, record.city)
+            cinema = cinemas.get(ckey)
+            if cinema is None:
+                cinema = cinemas[ckey] = _get_or_create_cinema(session, record)
             starts_at = parse_showtime_datetime(record.date or "", record.showtime or "")
         except (ValueError, TypeError) as exc:
             logger.warning(
@@ -45,29 +57,25 @@ def ingest_records(records: Iterable[ShowtimeRecord], session: Session) -> int:
             )
             continue
 
-        existing = (
-            session.query(Showtime)
-            .filter_by(
-                movie_id=movie.id,
-                cinema_id=cinema.id,
-                starts_at=starts_at,
-                screen=record.screen,
-            )
-            .one_or_none()
-        )
+        if movie.id not in loaded_movies:
+            loaded_movies.add(movie.id)
+            for st in session.query(Showtime).filter_by(movie_id=movie.id):
+                slots[(st.movie_id, st.cinema_id, st.starts_at, st.screen)] = st
+
+        key = (movie.id, cinema.id, starts_at, record.screen)
+        existing = slots.get(key)
         if existing is not None:
             existing.booking_url = record.booking_url or existing.booking_url
             continue
 
-        session.add(
-            Showtime(
-                movie=movie,
-                cinema=cinema,
-                starts_at=starts_at,
-                screen=record.screen,
-                booking_url=record.booking_url,
-            )
+        slots[key] = Showtime(
+            movie=movie,
+            cinema=cinema,
+            starts_at=starts_at,
+            screen=record.screen,
+            booking_url=record.booking_url,
         )
+        session.add(slots[key])
         written += 1
 
     session.commit()
