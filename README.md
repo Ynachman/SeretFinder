@@ -110,6 +110,18 @@ uvicorn backend.main:app --reload
 - Interactive API docs: http://127.0.0.1:8000/docs
 - Health check: http://127.0.0.1:8000/health
 
+## 🔎 API endpoints
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /movies?q=&now_showing=true&limit=&offset=` | Search/list movies (default: only those with upcoming showtimes) |
+| `GET /movies/{id}` | Movie detail |
+| `GET /movies/{id}/showtimes?city=&date_from=&date_to=` | Upcoming screenings with cinema info |
+| `GET /cinemas?city=&chain=` | List cinemas |
+| `GET /cinemas/nearby?lat=&lng=&radius_km=` | Cinemas within a radius, nearest first (haversine) |
+| `GET /cinemas/{id}` | Cinema detail |
+| `GET /cinemas/{id}/showtimes?date_from=&date_to=` | Upcoming screenings at a cinema |
+
 ## 🕷️ Running the scraper
 
 ```powershell

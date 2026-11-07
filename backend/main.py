@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import models  # noqa: F401  (registers models on Base.metadata)
+from .api import router as api_router
 from .config import get_settings
 from .database import Base, engine, enable_vector_extension
 
@@ -41,6 +42,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(api_router)
 
 
 @app.get("/")
