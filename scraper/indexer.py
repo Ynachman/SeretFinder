@@ -715,6 +715,10 @@ def _ingest_to_db(records: list[ShowtimeRecord]) -> None:
     session = SessionLocal()
     try:
         ingest_records(records, session)
+        # Locate any cinemas that were new in this run (no-op when all are set).
+        from .geocode import geocode_missing
+
+        geocode_missing(session)
     finally:
         session.close()
 

@@ -128,8 +128,9 @@ def nearby_cinemas(
     )
     rows = db.execute(stmt).all()
     return [
-        NearbyCinemaOut.model_validate(c, from_attributes=True).model_copy(
-            update={"distance_km": round(d, 2)}
+        NearbyCinemaOut(
+            **CinemaOut.model_validate(c, from_attributes=True).model_dump(),
+            distance_km=round(d, 2),
         )
         for c, d in rows
         if d <= radius_km

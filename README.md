@@ -131,6 +131,15 @@ python -m scraper.indexer
 This scrapes the default Seret.co.il listing page, enriches each record with
 TMDB metadata, and writes the results to `data.json` in the project root.
 
+With `--to-db`, new cinemas are geocoded automatically (OpenStreetMap
+Nominatim, ~1 request/second, no API key): the venue is looked up by name and
+city, falling back to the city centre. To (re)run it by hand:
+
+```powershell
+python -m scraper.geocode          # fill in missing coordinates
+python -m scraper.geocode --redo   # re-geocode every cinema
+```
+
 > The CSS selectors in `scraper/indexer.py` are best-effort defaults — inspect
 > the live DOM of seret.co.il and update `MOVIE_LINK_SELECTOR`,
 > `CINEMA_ROW_SELECTOR`, and `SHOWTIME_SLOT_SELECTOR` as needed.
