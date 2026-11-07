@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -76,16 +77,31 @@ def parse_omdb(payload: dict[str, Any]) -> dict[str, Any]:
 def fetch_omdb(imdb_id: str) -> Optional[dict[str, Any]]:
     """Return parsed OMDb ratings for ``imdb_id`` or ``None`` on request failure."""
     settings = get_settings()
-    try:
-        resp = requests.get(
-            OMDB_URL,
-            params={"i": imdb_id, "apikey": settings.omdb_api_key},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-    except (requests.RequestException, ValueError) as exc:
-        logger.warning("OMDb request failed for %s: %s", imdb_id, type(exc).__name__)
+    payload: Optional[dict[str, Any]] = None
+    for attempt in range(1, 4):
+        try:
+            resp = requests.get(
+                OMDB_URL,
+                params={"i": imdb_id, "apikey": settings.omdb_api_key},
+                timeout=15,
+            )
+            if resp.status_code in (429, 500, 502, 503, 504) and attempt < 3:
+                time.sleep(2 * attempt)  # free tier is flaky under bursts; back off
+                continue
+            resp.raise_for_status()
+            payload = resp.json()
+            break
+        except requests.HTTPError as exc:
+            # Only the status code: the exception text contains the URL (and key).
+            logger.warning("OMDb request failed for %s: HTTP %s", imdb_id, exc.response.status_code)
+            return None
+        except (requests.RequestException, ValueError) as exc:
+            if attempt < 3:
+                time.sleep(2 * attempt)
+                continue
+            logger.warning("OMDb request failed for %s: %s", imdb_id, type(exc).__name__)
+            return None
+    if payload is None:
         return None
     if payload.get("Error") and "limit" in str(payload["Error"]).lower():
         logger.error("OMDb daily limit reached; stopping ratings refresh.")

@@ -124,7 +124,8 @@ function badges(m, big) {
       : `<span class="badge imdb">${inner}</span>`);
   }
   if (m.rt_score != null) out.push(`<span class="badge rt" title="Rotten Tomatoes">🍅 <b>${m.rt_score}%</b></span>`);
-  if (m.vote_average) out.push(`<span class="badge" title="דירוג משתמשי TMDB"><span>TMDB</span> <b>${m.vote_average.toFixed(1)}</b></span>`);
+  // TMDB's own score is only a fallback for movies with no IMDb / Rotten Tomatoes data.
+  if (m.vote_average && m.imdb_rating == null && m.rt_score == null) out.push(`<span class="badge" title="דירוג משתמשי TMDB"><span>TMDB</span> <b>${m.vote_average.toFixed(1)}</b></span>`);
   if (big && m.imdb_id && m.imdb_rating == null)
     out.push(`<a class="badge" href="https://www.imdb.com/title/${esc(m.imdb_id)}/" target="_blank" rel="noopener">IMDb ↗</a>`);
   return out.length ? `<div class="badges${big ? " big" : ""}">${out.join("")}</div>` : "";
