@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     tmdb_api_key: str = ""
     tmdb_base_url: str = "https://api.themoviedb.org/3"
 
+    # --- OMDb (IMDb rating + Rotten Tomatoes score) --------------------------
+    # Free key (1,000 requests/day): https://www.omdbapi.com/apikey.aspx
+    omdb_api_key: str = ""
+
     # --- OpenAI (embeddings for semantic search) -----------------------------
     # Must produce EMBEDDING_DIMENSIONS (1536) vectors, i.e. text-embedding-3-small.
     openai_api_key: str = ""
@@ -62,6 +66,11 @@ class Settings(BaseSettings):
     def has_tmdb_api_key(self) -> bool:
         """True when a TMDB API key has been configured."""
         return bool(self.tmdb_api_key)
+
+    @property
+    def has_omdb_api_key(self) -> bool:
+        """True when an OMDb API key has been configured."""
+        return bool(self.omdb_api_key)
 
     @property
     def has_openai_api_key(self) -> bool:

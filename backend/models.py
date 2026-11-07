@@ -35,6 +35,13 @@ class Movie(Base):
     backdrop_path: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     release_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     vote_average: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    #: External ratings (see scraper.ratings). TMDB's own score is vote_average.
+    imdb_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    imdb_rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    imdb_votes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    #: Rotten Tomatoes Tomatometer, 0-100.
+    rt_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ratings_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     #: pgvector embedding produced by the daily enrichment cron job.
     embedding: Mapped[Optional[Vector]] = mapped_column(Vector(EMBEDDING_DIMENSIONS), nullable=True)
 

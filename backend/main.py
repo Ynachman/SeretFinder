@@ -17,6 +17,7 @@ from . import models  # noqa: F401  (registers models on Base.metadata)
 from .api import router as api_router
 from .config import get_settings
 from .database import Base, engine, enable_vector_extension
+from .migrations import apply_migrations
 
 settings = get_settings()
 STATIC_DIR = Path(__file__).parent / "static"
@@ -27,6 +28,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Run once at startup: enable pgvector and create any missing tables."""
     enable_vector_extension()
     Base.metadata.create_all(bind=engine)
+    apply_migrations(engine)
     yield
 
 

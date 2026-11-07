@@ -113,6 +113,34 @@ uvicorn backend.main:app --reload
 - Interactive API docs: http://127.0.0.1:8000/docs
 - Health check: http://127.0.0.1:8000/health
 
+## 🔄 Daily refresh
+
+One command runs the whole pipeline — scrape → ingest → prune old showtimes →
+geocode new cinemas → ratings → embeddings (if an OpenAI key is set):
+
+```powershell
+python -m scraper.refresh
+```
+
+To run it automatically every day (default 04:00, current user, no admin
+needed; the PC must be on — a missed run happens at next login):
+
+```powershell
+.\scripts\schedule_daily_refresh.ps1             # or -At 06:30, or -Remove
+Start-ScheduledTask -TaskName "SeretFinder daily refresh"   # test it now
+```
+
+Output is appended to `logs\refresh.log`.
+
+## ⭐ Ratings
+
+Each movie shows its **IMDb** rating, **Rotten Tomatoes** score and **TMDB**
+score. The IMDb id comes from TMDB; the IMDb/RT numbers come from
+[OMDb](https://www.omdbapi.com/apikey.aspx) (free key, 1,000 requests/day):
+add `OMDB_API_KEY=...` to `init.env`, then `python -m scraper.ratings --all`
+(the daily refresh keeps them current). Google user ratings are not included —
+Google offers no public API for movie ratings.
+
 ## 🧠 Semantic search
 
 1. Add `OPENAI_API_KEY=...` to `init.env` (uses `text-embedding-3-small`).
@@ -124,6 +152,8 @@ uvicorn backend.main:app --reload
 | Endpoint | Description |
 | --- | --- |
 | `GET /movies?q=&now_showing=true&limit=&offset=` | Search/list movies (default: only those with upcoming showtimes) |
+| `GET /cities` | Cities with geocoded cinemas and their centre point |
+| `GET /movies?lat=&lng=&radius_km=` | Same filters on `/movies`, `/movies/search` and `/movies/{id}/showtimes`: only what shows within the radius |
 | `GET /movies/search?q=` | Semantic search (needs `OPENAI_API_KEY` + `python -m scraper.enrich`) |
 | `GET /movies/{id}` | Movie detail |
 | `GET /movies/{id}/showtimes?city=&date_from=&date_to=` | Upcoming screenings with cinema info |

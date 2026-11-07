@@ -13,6 +13,7 @@ from .embeddings import EmbeddingsUnavailable, embed_text
 from .models import Cinema, Movie, Showtime
 from .schemas import (
     CinemaOut,
+    CityOut,
     MovieOut,
     MovieShowtimeOut,
     NearbyCinemaOut,
@@ -28,17 +29,63 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _distance_km(lat: float, lng: float):
+    """SQL expression: haversine distance (km) from a point to ``Cinema``."""
+    dlat = func.radians(Cinema.latitude - lat)
+    dlng = func.radians(Cinema.longitude - lng)
+    a = func.power(func.sin(dlat / 2), 2) + (
+        func.cos(func.radians(lat))
+        * func.cos(func.radians(Cinema.latitude))
+        * func.power(func.sin(dlng / 2), 2)
+    )
+    return 2 * EARTH_RADIUS_KM * func.asin(func.sqrt(func.least(1.0, a)))
+
+
+def _area(lat: Optional[float], lng: Optional[float], radius_km: Optional[float]):
+    """Validate the optional lat/lng/radius trio; return it or ``None``."""
+    given = [v is not None for v in (lat, lng, radius_km)]
+    if not any(given):
+        return None
+    if not all(given):
+        raise HTTPException(status_code=422, detail="lat, lng and radius_km must be given together")
+    return lat, lng, radius_km
+
+
+def _cinemas_in_area(area):
+    """Sub-select of cinema ids within the area (``(lat, lng, radius_km)``)."""
+    lat, lng, radius = area
+    return select(Cinema.id).where(
+        Cinema.latitude.is_not(None),
+        Cinema.longitude.is_not(None),
+        _distance_km(lat, lng) <= radius,
+    )
+
+
+def _in_area_showing(stmt, area):
+    """Restrict a ``Movie`` select to movies with upcoming shows in ``area``."""
+    shows = select(Showtime.movie_id).where(
+        Showtime.starts_at >= _now(), Showtime.cinema_id.in_(_cinemas_in_area(area))
+    )
+    return stmt.where(Movie.id.in_(shows))
+
+
 # --- Movies -----------------------------------------------------------------
 @router.get("/movies", response_model=list[MovieOut], tags=["movies"])
 def list_movies(
     q: Optional[str] = Query(None, description="Substring match on Hebrew/English title"),
     now_showing: bool = Query(True, description="Only movies with upcoming showtimes"),
+    lat: Optional[float] = Query(None, ge=-90, le=90),
+    lng: Optional[float] = Query(None, ge=-180, le=180),
+    radius_km: Optional[float] = Query(None, gt=0, le=500, description="With lat/lng: only movies showing within this radius"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[Movie]:
     stmt = select(Movie)
-    if now_showing:
+    area = _area(lat, lng, radius_km)
+    if area:
+        stmt = _in_area_showing(stmt, area)
+    elif now_showing:
         upcoming = select(Showtime.movie_id).where(Showtime.starts_at >= _now())
         stmt = stmt.where(Movie.id.in_(upcoming))
     if q:
@@ -52,16 +99,22 @@ def list_movies(
 def semantic_search(
     q: str = Query(..., min_length=2, description="Free-text, e.g. 'funny family film'"),
     now_showing: bool = Query(True, description="Only movies with upcoming showtimes"),
+    lat: Optional[float] = Query(None, ge=-90, le=90),
+    lng: Optional[float] = Query(None, ge=-180, le=180),
+    radius_km: Optional[float] = Query(None, gt=0, le=500),
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
 ) -> list[Movie]:
     """Semantic (vector) search: movies whose embedding is closest to the query."""
+    area = _area(lat, lng, radius_km)
     try:
         query_vec = embed_text(q)
     except EmbeddingsUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     stmt = select(Movie).where(Movie.embedding.is_not(None))
-    if now_showing:
+    if area:
+        stmt = _in_area_showing(stmt, area)
+    elif now_showing:
         upcoming = select(Showtime.movie_id).where(Showtime.starts_at >= _now())
         stmt = stmt.where(Movie.id.in_(upcoming))
     stmt = stmt.order_by(Movie.embedding.cosine_distance(query_vec)).limit(limit)
@@ -84,14 +137,20 @@ def get_movie(movie_id: int, db: Session = Depends(get_db)) -> Movie:
 def movie_showtimes(
     movie_id: int,
     city: Optional[str] = None,
+    lat: Optional[float] = Query(None, ge=-90, le=90),
+    lng: Optional[float] = Query(None, ge=-180, le=180),
+    radius_km: Optional[float] = Query(None, gt=0, le=500),
     date_from: Optional[datetime] = Query(None, description="Defaults to now"),
     date_to: Optional[datetime] = None,
     limit: int = Query(200, ge=1, le=500),
     db: Session = Depends(get_db),
 ) -> list[Showtime]:
+    area = _area(lat, lng, radius_km)
     if db.get(Movie, movie_id) is None:
         raise HTTPException(status_code=404, detail="Movie not found")
     conds = [Showtime.movie_id == movie_id, Showtime.starts_at >= (date_from or _now())]
+    if area:
+        conds.append(Showtime.cinema_id.in_(_cinemas_in_area(area)))
     if date_to:
         conds.append(Showtime.starts_at <= date_to)
     stmt = (
@@ -105,6 +164,24 @@ def movie_showtimes(
     if city:
         stmt = stmt.where(Cinema.city.ilike(city))
     return list(db.scalars(stmt))
+
+
+# --- Cities -----------------------------------------------------------------
+@router.get("/cities", response_model=list[CityOut], tags=["cinemas"])
+def list_cities(db: Session = Depends(get_db)) -> list[CityOut]:
+    """Cities that have geocoded cinemas, with their centre (mean cinema position)."""
+    rows = db.execute(
+        select(
+            Cinema.city,
+            func.avg(Cinema.latitude),
+            func.avg(Cinema.longitude),
+            func.count(Cinema.id),
+        )
+        .where(Cinema.city.is_not(None), Cinema.latitude.is_not(None), Cinema.longitude.is_not(None))
+        .group_by(Cinema.city)
+        .order_by(Cinema.city)
+    ).all()
+    return [CityOut(city=c, latitude=la, longitude=lo, cinemas=n) for c, la, lo, n in rows]
 
 
 # --- Cinemas ----------------------------------------------------------------
@@ -133,14 +210,7 @@ def nearby_cinemas(
     db: Session = Depends(get_db),
 ) -> list[NearbyCinemaOut]:
     """Cinemas within ``radius_km`` of a point, nearest first (haversine)."""
-    dlat = func.radians(Cinema.latitude - lat)
-    dlng = func.radians(Cinema.longitude - lng)
-    a = func.power(func.sin(dlat / 2), 2) + (
-        func.cos(func.radians(lat))
-        * func.cos(func.radians(Cinema.latitude))
-        * func.power(func.sin(dlng / 2), 2)
-    )
-    distance = (2 * EARTH_RADIUS_KM * func.asin(func.sqrt(func.least(1.0, a)))).label("distance_km")
+    distance = _distance_km(lat, lng).label("distance_km")
     stmt = (
         select(Cinema, distance)
         .where(Cinema.latitude.is_not(None), Cinema.longitude.is_not(None))

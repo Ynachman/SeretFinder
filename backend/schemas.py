@@ -18,7 +18,20 @@ class MovieOut(BaseModel):
     poster_path: Optional[str] = None
     backdrop_path: Optional[str] = None
     release_date: Optional[date] = None
+    #: TMDB user score (0-10).
     vote_average: Optional[float] = None
+    imdb_id: Optional[str] = None
+    imdb_rating: Optional[float] = None
+    imdb_votes: Optional[int] = None
+    #: Rotten Tomatoes Tomatometer (0-100).
+    rt_score: Optional[int] = None
+
+
+class CityOut(BaseModel):
+    city: str
+    latitude: float
+    longitude: float
+    cinemas: int
 
 
 class CinemaOut(BaseModel):
