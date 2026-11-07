@@ -110,11 +110,18 @@ uvicorn backend.main:app --reload
 - Interactive API docs: http://127.0.0.1:8000/docs
 - Health check: http://127.0.0.1:8000/health
 
+## 🧠 Semantic search
+
+1. Add `OPENAI_API_KEY=...` to `init.env` (uses `text-embedding-3-small`).
+2. Embed the movies: `python -m scraper.enrich` (only embeds movies without a vector; `--redo` re-embeds all).
+3. Query `GET /movies/search?q=funny family film` — results are ordered by cosine distance.
+
 ## 🔎 API endpoints
 
 | Endpoint | Description |
 | --- | --- |
 | `GET /movies?q=&now_showing=true&limit=&offset=` | Search/list movies (default: only those with upcoming showtimes) |
+| `GET /movies/search?q=` | Semantic search (needs `OPENAI_API_KEY` + `python -m scraper.enrich`) |
 | `GET /movies/{id}` | Movie detail |
 | `GET /movies/{id}/showtimes?city=&date_from=&date_to=` | Upcoming screenings with cinema info |
 | `GET /cinemas?city=&chain=` | List cinemas |

@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from .database import get_db
+from .embeddings import EmbeddingsUnavailable, embed_text
 from .models import Cinema, Movie, Showtime
 from .schemas import (
     CinemaOut,
@@ -44,6 +45,26 @@ def list_movies(
         like = f"%{q}%"
         stmt = stmt.where(Movie.hebrew_title.ilike(like) | Movie.english_title.ilike(like))
     stmt = stmt.order_by(Movie.hebrew_title).limit(limit).offset(offset)
+    return list(db.scalars(stmt))
+
+
+@router.get("/movies/search", response_model=list[MovieOut], tags=["movies"])
+def semantic_search(
+    q: str = Query(..., min_length=2, description="Free-text, e.g. 'funny family film'"),
+    now_showing: bool = Query(True, description="Only movies with upcoming showtimes"),
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+) -> list[Movie]:
+    """Semantic (vector) search: movies whose embedding is closest to the query."""
+    try:
+        query_vec = embed_text(q)
+    except EmbeddingsUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    stmt = select(Movie).where(Movie.embedding.is_not(None))
+    if now_showing:
+        upcoming = select(Showtime.movie_id).where(Showtime.starts_at >= _now())
+        stmt = stmt.where(Movie.id.in_(upcoming))
+    stmt = stmt.order_by(Movie.embedding.cosine_distance(query_vec)).limit(limit)
     return list(db.scalars(stmt))
 
 
