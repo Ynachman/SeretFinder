@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>סרט פיינדר — מה רץ בקולנוע</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #fff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e4e2dc;
+    --accent: #e8590c; --accent-ink: #fff; --chip: #efede7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151517; --card: #212125; --ink: #f2f2f3; --muted: #a0a0a8; --line: #33333a; --chip: #2c2c32; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, "Segoe UI", Arial, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 16px; }
+  .bar { max-width: 1100px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  h1 { font-size: 20px; margin: 0 0 0 12px; white-space: nowrap; }
+  input[type=search], select, button { font: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: var(--card); color: var(--ink); }
+  input[type=search] { flex: 1 1 220px; min-width: 0; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .note { color: var(--muted); font-size: 14px; margin: 4px 0 12px; min-height: 1.4em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .movie { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer; text-align: start; padding: 0; display: block; width: 100%; }
+  .movie:hover { border-color: var(--accent); }
+  .poster { aspect-ratio: 2/3; background: var(--chip); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 40px; }
+  .poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .meta { padding: 8px 10px 10px; }
+  .meta b { display: block; font-size: 15px; line-height: 1.3; }
+  .meta span { color: var(--muted); font-size: 13px; }
+  .rating { color: var(--accent); font-weight: 600; }
+  .detail { display: none; }
+  .detail.open { display: block; }
+  .back { margin-bottom: 12px; }
+  .hero { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .hero .poster { width: 140px; border-radius: 12px; overflow: hidden; flex: none; }
+  .hero h2 { margin: 0 0 4px; }
+  .hero p { margin: 6px 0 0; max-width: 60ch; color: var(--muted); }
+  .cinema { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .cinema h3 { margin: 0 0 2px; font-size: 17px; }
+  .cinema .sub { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  .day { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); }
+  .day .d { width: 90px; flex: none; font-weight: 600; font-size: 14px; }
+  .times { display: flex; flex-wrap: wrap; gap: 6px; }
+  .t { background: var(--chip); border-radius: 8px; padding: 4px 9px; font-variant-numeric: tabular-nums; text-decoration: none; color: var(--ink); direction: ltr; }
+  .t small { color: var(--muted); }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+  @media (max-width: 520px) { h1 { width: 100%; margin: 0; } .day .d { width: 70px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>🍿 סרט פיינדר</h1>
+    <input id="q" type="search" placeholder="חיפוש סרט… (או תיאור חופשי עם ✨)" aria-label="חיפוש סרט">
+    <button id="ai" type="button" title="חיפוש חכם לפי תיאור (דורש מפתח OpenAI)" aria-pressed="false">✨ חכם</button>
+    <select id="city" aria-label="עיר"><option value="">כל הערים</option></select>
+    <button id="near" type="button" aria-pressed="false">📍 קרוב אליי</button>
+  </div>
+</header>
+<main>
+  <section id="list">
+    <div class="note" id="note" role="status" aria-live="polite"></div>
+    <div class="grid" id="grid"></div>
+  </section>
+  <section id="detail" class="detail" aria-live="polite"></section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const state = { city: "", loc: null, ai: false, dist: {}, cinemas: [], movie: null };
+const TZ = "Asia/Jerusalem";
+
+async function api(path) {
+  const r = await fetch(path);
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { msg = (await r.json()).detail || msg; } catch (e) {}
+    const err = new Error(msg); err.status = r.status; throw err;
+  }
+  return r.json();
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const cityName = (c) => (c || "").replace(/-/g, " ");
+
+function poster(m) {
+  return m.poster_path ? `<img src="${esc(m.poster_path)}" alt="" loading="lazy">` : "🎬";
+}
+
+async function loadMovies() {
+  const q = $("#q").value.trim();
+  $("#note").textContent = "טוען…";
+  try {
+    let movies;
+    if (q && state.ai) {
+      movies = await api(`/movies/search?q=${encodeURIComponent(q)}&limit=24`);
+    } else {
+      movies = await api(`/movies?limit=200${q ? "&q=" + encodeURIComponent(q) : ""}`);
+    }
+    if (state.city) movies = await filterByCity(movies);
+    renderMovies(movies, q);
+  } catch (e) {
+    $("#grid").innerHTML = "";
+    $("#note").textContent = e.status === 503
+      ? "החיפוש החכם עדיין לא מוגדר (חסר מפתח OpenAI). אפשר לכבות את ✨ ולחפש לפי שם."
+      : "משהו השתבש: " + e.message;
+  }
+}
+
+// A movie is "in" a city if it has at least one upcoming showtime there.
+const cityCache = {};
+async function filterByCity(movies) {
+  if (!cityCache[state.city]) {
+    const ids = new Set();
+    const cin = state.cinemas.filter((c) => c.city === state.city);
+    await Promise.all(movies.length ? cin.map(async (c) => {
+      (await api(`/cinemas/${c.id}/showtimes?limit=500`)).forEach((s) => ids.add(s.movie_id));
+    }) : []);
+    cityCache[state.city] = ids;
+  }
+  return movies.filter((m) => cityCache[state.city].has(m.id));
+}
+
+function renderMovies(movies, q) {
+  $("#note").textContent = movies.length
+    ? `${movies.length === 1 ? "סרט אחד" : movies.length + " סרטים"}${state.city ? " ב" + cityName(state.city) : ""}${q ? ` · “${q}”` : ""}`
+    : "";
+  $("#grid").innerHTML = movies.length ? movies.map((m) => `
+    <button class="movie" data-id="${m.id}" type="button">
+      <div class="poster">${poster(m)}</div>
+      <div class="meta"><b>${esc(m.hebrew_title)}</b>
+        <span>${esc(m.english_title || "")}</span>
+        ${m.vote_average ? `<div><span class="rating">★ ${m.vote_average.toFixed(1)}</span></div>` : ""}
+      </div></button>`).join("")
+    : `<div class="empty" style="grid-column:1/-1">לא נמצאו סרטים${state.city ? " בעיר הזו" : ""}. נסו חיפוש אחר.</div>`;
+  state.movies = Object.fromEntries(movies.map((m) => [m.id, m]));
+}
+
+async function openMovie(id) {
+  const m = state.movies[id];
+  $("#list").style.display = "none";
+  const d = $("#detail"); d.classList.add("open");
+  d.innerHTML = `<button class="back" type="button" id="back">→ חזרה</button>
+    <div class="hero"><div class="poster">${poster(m)}</div>
+    <div><h2>${esc(m.hebrew_title)}</h2><div class="rating">${m.english_title ? esc(m.english_title) : ""}
+      ${m.vote_average ? " · ★ " + m.vote_average.toFixed(1) : ""}</div>
+      ${m.overview ? `<p>${esc(m.overview)}</p>` : ""}</div></div>
+    <div id="shows" class="note">טוען שעות הקרנה…</div>`;
+  window.scrollTo(0, 0);
+  try {
+    let shows = await api(`/movies/${id}/showtimes?limit=500`);
+    if (state.city) shows = shows.filter((s) => s.cinema.city === state.city);
+    renderShows(shows);
+  } catch (e) { $("#shows").textContent = "לא הצלחנו לטעון שעות: " + e.message; }
+}
+
+function renderShows(shows) {
+  const box = $("#shows"); box.className = "";
+  if (!shows.length) { box.innerHTML = `<div class="empty">אין הקרנות קרובות${state.city ? " ב" + cityName(state.city) : ""}.</div>`; return; }
+  const byCinema = new Map();
+  shows.forEach((s) => { if (!byCinema.has(s.cinema.id)) byCinema.set(s.cinema.id, { c: s.cinema, s: [] }); byCinema.get(s.cinema.id).s.push(s); });
+  const groups = [...byCinema.values()];
+  if (state.loc) groups.sort((a, b) => (state.dist[a.c.id] ?? 1e9) - (state.dist[b.c.id] ?? 1e9));
+  else groups.sort((a, b) => a.c.name.localeCompare(b.c.name, "he"));
+  const dayFmt = new Intl.DateTimeFormat("he-IL", { weekday: "short", day: "numeric", month: "numeric", timeZone: TZ });
+  const timeFmt = new Intl.DateTimeFormat("he-IL", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ });
+  box.innerHTML = groups.map(({ c, s }) => {
+    const days = new Map();
+    s.forEach((x) => { const dt = new Date(x.starts_at); const k = dayFmt.format(dt); (days.get(k) || days.set(k, []).get(k)).push([dt, x]); });
+    const dist = state.dist[c.id] != null ? ` · ${state.dist[c.id].toFixed(1)} ק״מ ממך` : "";
+    return `<div class="cinema"><h3>${esc(c.name)}</h3><div class="sub">${esc(cityName(c.city))}${dist}</div>` +
+      [...days].map(([k, list]) => `<div class="day"><div class="d">${esc(k)}</div><div class="times">` +
+        list.map(([dt, x]) => {
+          const inner = `${timeFmt.format(dt)}${x.screen ? ` <small>${esc(x.screen)}</small>` : ""}`;
+          return x.booking_url ? `<a class="t" href="${esc(x.booking_url)}" target="_blank" rel="noopener">${inner}</a>` : `<span class="t">${inner}</span>`;
+        }).join("") + `</div></div>`).join("") + `</div>`;
+  }).join("");
+}
+
+function closeMovie() { $("#detail").classList.remove("open"); $("#detail").innerHTML = ""; $("#list").style.display = ""; }
+
+async function useLocation() {
+  const btn = $("#near");
+  if (state.loc) { state.loc = null; state.dist = {}; btn.classList.remove("on"); btn.setAttribute("aria-pressed", "false"); btn.textContent = "📍 קרוב אליי"; return; }
+  if (!navigator.geolocation) { $("#note").textContent = "הדפדפן לא תומך באיתור מיקום."; return; }
+  btn.textContent = "מאתר…";
+  navigator.geolocation.getCurrentPosition(async (p) => {
+    state.loc = { lat: p.coords.latitude, lng: p.coords.longitude };
+    try {
+      const near = await api(`/cinemas/nearby?lat=${state.loc.lat}&lng=${state.loc.lng}&radius_km=500&limit=200`);
+      state.dist = Object.fromEntries(near.map((c) => [c.id, c.distance_km]));
+      if (near.length && !state.city) { state.city = near[0].city || ""; $("#city").value = state.city; }
+    } catch (e) {}
+    btn.classList.add("on"); btn.setAttribute("aria-pressed", "true"); btn.textContent = "📍 קרוב אליי ✓";
+    refresh();
+  }, () => { btn.textContent = "📍 קרוב אליי"; $("#note").textContent = "לא קיבלנו הרשאת מיקום. אפשר לבחור עיר ידנית."; });
+}
+
+function refresh() { closeMovie(); loadMovies(); }
+
+async function init() {
+  try {
+    state.cinemas = await api("/cinemas?limit=500");
+    const cities = [...new Set(state.cinemas.map((c) => c.city).filter(Boolean))].sort((a, b) => a.localeCompare(b, "he"));
+    $("#city").insertAdjacentHTML("beforeend", cities.map((c) => `<option value="${esc(c)}">${esc(cityName(c))}</option>`).join(""));
+  } catch (e) {}
+  let t;
+  $("#q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(refresh, 300); });
+  $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(t); refresh(); } });
+  $("#city").addEventListener("change", (e) => { state.city = e.target.value; refresh(); });
+  $("#ai").addEventListener("click", (e) => { state.ai = !state.ai; e.currentTarget.classList.toggle("on", state.ai); e.currentTarget.setAttribute("aria-pressed", state.ai); if ($("#q").value.trim()) refresh(); });
+  $("#near").addEventListener("click", useLocation);
+  $("#grid").addEventListener("click", (e) => { const b = e.target.closest(".movie"); if (b) openMovie(b.dataset.id); });
+  $("#detail").addEventListener("click", (e) => { if (e.target.id === "back") closeMovie(); });
+  loadMovies();
+}
+init();
+</script>
+</body>
+</html>

@@ -7,8 +7,11 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from . import models  # noqa: F401  (registers models on Base.metadata)
 from .api import router as api_router
@@ -16,6 +19,7 @@ from .config import get_settings
 from .database import Base, engine, enable_vector_extension
 
 settings = get_settings()
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
@@ -47,10 +51,10 @@ app.add_middleware(
 app.include_router(api_router)
 
 
-@app.get("/")
-async def root() -> dict[str, str]:
-    """Root endpoint announcing the service name and status."""
-    return {"app": "SeretFinder", "status": "ok"}
+@app.get("/", include_in_schema=False)
+async def root() -> FileResponse:
+    """Serve the web UI."""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health")

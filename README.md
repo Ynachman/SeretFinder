@@ -107,6 +107,9 @@ Start the FastAPI server (from the project root, with the venv active):
 uvicorn backend.main:app --reload
 ```
 
+- **Web app (Hebrew, RTL):** http://127.0.0.1:8000/ — browse what's showing,
+  search by title (or by description with ✨ once OpenAI is configured), filter
+  by city or "near me", and open a movie for showtimes grouped by cinema.
 - Interactive API docs: http://127.0.0.1:8000/docs
 - Health check: http://127.0.0.1:8000/health
 
