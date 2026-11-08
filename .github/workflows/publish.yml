@@ -1,0 +1,75 @@
+# Daily: scrape seret.co.il -> update Neon -> export site/data.json -> publish
+# the static app to GitHub Pages (free, global CDN, no server to wake up).
+#
+# Needs repository secrets (Settings -> Secrets and variables -> Actions):
+#   DATABASE_URL   Neon connection string (postgresql+psycopg2://...)
+#   TMDB_API_KEY   TMDB key
+#   OMDB_API_KEY   OMDb key (Rotten Tomatoes; optional)
+# and Settings -> Pages -> Source = "GitHub Actions".
+name: Refresh & publish
+
+on:
+  schedule:
+    - cron: "0 3 * * *"        # 03:00 UTC = 05:00/06:00 in Israel
+  workflow_dispatch:            # "Run workflow" button for a manual refresh
+  push:                         # app changes: republish without re-scraping
+    branches: [main, master]
+    paths: ["site/**", "scraper/export.py", ".github/workflows/publish.yml"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Chromium for Playwright
+        if: github.event_name != 'push'
+        run: python -m playwright install --with-deps chromium
+
+      - name: Scrape, ingest, geocode, ratings
+        if: github.event_name != 'push'
+        # If the site blocks this run, still publish the existing data below;
+        # the app shows a "not updated" warning once data is >2 days old.
+        continue-on-error: true
+        run: python -m scraper.refresh
+
+      - name: Export site/data.json
+        run: python -m scraper.export
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

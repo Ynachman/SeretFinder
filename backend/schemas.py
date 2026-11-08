@@ -25,6 +25,8 @@ class MovieOut(BaseModel):
     imdb_votes: Optional[int] = None
     #: Rotten Tomatoes Tomatometer (0-100).
     rt_score: Optional[int] = None
+    #: Screenings matching the list's area/time filters (list endpoint only).
+    upcoming_showtimes: Optional[int] = None
 
 
 class CityOut(BaseModel):

@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from .database import get_db
-from .embeddings import EmbeddingsUnavailable, embed_text
 from .models import Cinema, Movie, Showtime
 from .schemas import (
     CinemaOut,
@@ -61,14 +60,6 @@ def _cinemas_in_area(area):
     )
 
 
-def _in_area_showing(stmt, area):
-    """Restrict a ``Movie`` select to movies with upcoming shows in ``area``."""
-    shows = select(Showtime.movie_id).where(
-        Showtime.starts_at >= _now(), Showtime.cinema_id.in_(_cinemas_in_area(area))
-    )
-    return stmt.where(Movie.id.in_(shows))
-
-
 # --- Movies -----------------------------------------------------------------
 @router.get("/movies", response_model=list[MovieOut], tags=["movies"])
 def list_movies(
@@ -77,48 +68,47 @@ def list_movies(
     lat: Optional[float] = Query(None, ge=-90, le=90),
     lng: Optional[float] = Query(None, ge=-180, le=180),
     radius_km: Optional[float] = Query(None, gt=0, le=500, description="With lat/lng: only movies showing within this radius"),
+    date_from: Optional[datetime] = Query(None, description="Only count/require showtimes from here (default: now)"),
+    date_to: Optional[datetime] = Query(None, description="...and up to here"),
+    sort: Literal["popular", "rating", "title"] = Query(
+        "popular", description="popular = most upcoming screenings (in the area/window)"
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[Movie]:
-    stmt = select(Movie)
     area = _area(lat, lng, radius_km)
+    start = max(date_from, _now()) if date_from else _now()
+    conds = [Showtime.starts_at >= start]
+    if date_to:
+        conds.append(Showtime.starts_at <= date_to)
     if area:
-        stmt = _in_area_showing(stmt, area)
-    elif now_showing:
-        upcoming = select(Showtime.movie_id).where(Showtime.starts_at >= _now())
-        stmt = stmt.where(Movie.id.in_(upcoming))
+        conds.append(Showtime.cinema_id.in_(_cinemas_in_area(area)))
+    counts = (
+        select(Showtime.movie_id, func.count(Showtime.id).label("n"))
+        .where(*conds)
+        .group_by(Showtime.movie_id)
+        .subquery()
+    )
+    n = func.coalesce(counts.c.n, 0)
+    stmt = select(Movie, n).outerjoin(counts, counts.c.movie_id == Movie.id)
+    # A location or time window implies "must be showing there / then".
+    if now_showing or area or date_from or date_to:
+        stmt = stmt.where(counts.c.n > 0)
     if q:
         like = f"%{q}%"
         stmt = stmt.where(Movie.hebrew_title.ilike(like) | Movie.english_title.ilike(like))
-    stmt = stmt.order_by(Movie.hebrew_title).limit(limit).offset(offset)
-    return list(db.scalars(stmt))
-
-
-@router.get("/movies/search", response_model=list[MovieOut], tags=["movies"])
-def semantic_search(
-    q: str = Query(..., min_length=2, description="Free-text, e.g. 'funny family film'"),
-    now_showing: bool = Query(True, description="Only movies with upcoming showtimes"),
-    lat: Optional[float] = Query(None, ge=-90, le=90),
-    lng: Optional[float] = Query(None, ge=-180, le=180),
-    radius_km: Optional[float] = Query(None, gt=0, le=500),
-    limit: int = Query(10, ge=1, le=50),
-    db: Session = Depends(get_db),
-) -> list[Movie]:
-    """Semantic (vector) search: movies whose embedding is closest to the query."""
-    area = _area(lat, lng, radius_km)
-    try:
-        query_vec = embed_text(q)
-    except EmbeddingsUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    stmt = select(Movie).where(Movie.embedding.is_not(None))
-    if area:
-        stmt = _in_area_showing(stmt, area)
-    elif now_showing:
-        upcoming = select(Showtime.movie_id).where(Showtime.starts_at >= _now())
-        stmt = stmt.where(Movie.id.in_(upcoming))
-    stmt = stmt.order_by(Movie.embedding.cosine_distance(query_vec)).limit(limit)
-    return list(db.scalars(stmt))
+    order = {
+        "popular": [n.desc(), Movie.imdb_votes.desc().nulls_last()],
+        "rating": [Movie.imdb_rating.desc().nulls_last(), Movie.imdb_votes.desc().nulls_last()],
+        "title": [],
+    }[sort]
+    stmt = stmt.order_by(*order, Movie.hebrew_title).limit(limit).offset(offset)
+    movies = []
+    for movie, count in db.execute(stmt).all():
+        movie.upcoming_showtimes = count  # transient, for the response only
+        movies.append(movie)
+    return movies
 
 
 @router.get("/movies/{movie_id}", response_model=MovieOut, tags=["movies"])

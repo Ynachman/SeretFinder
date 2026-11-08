@@ -21,3 +21,6 @@ Thumbs.db
 
 debug/
 logs/
+data/
+site/data.json
+site/data.tmp

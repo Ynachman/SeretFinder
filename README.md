@@ -2,7 +2,7 @@
 
 A backend scaffold that scrapes movie showtimes from **seret.co.il**, enriches
 them with **TMDB** metadata, and stores everything in **PostgreSQL + pgvector**
-for future radius-based and semantic (vector) search.
+for radius-based search (the vector column is kept for future semantic search).
 
 ## 📁 Project Structure
 
@@ -108,15 +108,42 @@ uvicorn backend.main:app --reload
 ```
 
 - **Web app (Hebrew, RTL):** http://127.0.0.1:8000/ — browse what's showing,
-  search by title (or by description with ✨ once OpenAI is configured), filter
+  search by title, filter
   by city or "near me", and open a movie for showtimes grouped by cinema.
 - Interactive API docs: http://127.0.0.1:8000/docs
 - Health check: http://127.0.0.1:8000/health
 
+## 📱 Publishing for free (GitHub Pages)
+
+The app your friends use is **fully static**: `site/index.html` plus one
+`site/data.json` (~35 KB gzipped) that `python -m scraper.export` writes from
+the database. The page filters by city/radius/day and sorts on the phone
+itself, so it opens instantly from a CDN with no server to wake up, and a
+service worker makes it launch instantly (and work offline) from the home
+screen.
+
+`.github/workflows/publish.yml` runs every day at 03:00 UTC on GitHub's free
+runners: scrape → update Neon → ratings → export → deploy to GitHub Pages.
+One-time setup:
+
+1. Push this repo to GitHub. GitHub Pages is free for **public** repositories
+   (`init.env` is gitignored, so no secrets are published).
+2. Repo **Settings → Secrets and variables → Actions**: add `DATABASE_URL`,
+   `TMDB_API_KEY` and `OMDB_API_KEY`.
+3. Repo **Settings → Pages → Source: GitHub Actions**.
+4. **Actions → Refresh & publish → Run workflow** for the first run. The app is
+   then at `https://<user>.github.io/<repo>/`.
+
+Friends open the link and use **Share → Add to Home Screen** (iPhone) or
+**⋮ → Install app** (Android). If the scrape ever fails (e.g. the site blocks
+GitHub's servers), the last data is still published and the app's footer
+warns once the data is more than two days old.
+
 ## 🔄 Daily refresh
 
-One command runs the whole pipeline — scrape → ingest → prune old showtimes →
-geocode new cinemas → ratings → embeddings (if an OpenAI key is set):
+(Locally, or as a fallback to the GitHub workflow above.) One command runs
+the whole pipeline — scrape → ingest → prune old showtimes → geocode new
+cinemas → ratings → export `site/data.json`:
 
 ```powershell
 python -m scraper.refresh
@@ -134,18 +161,24 @@ Output is appended to `logs\refresh.log`.
 
 ## ⭐ Ratings
 
-Each movie shows its **IMDb** rating, **Rotten Tomatoes** score and **TMDB**
-score. The IMDb id comes from TMDB; the IMDb/RT numbers come from
-[OMDb](https://www.omdbapi.com/apikey.aspx) (free key, 1,000 requests/day):
-add `OMDB_API_KEY=...` to `init.env`, then `python -m scraper.ratings --all`
-(the daily refresh keeps them current). Google user ratings are not included —
-Google offers no public API for movie ratings.
+Each movie shows its **IMDb** rating and **Rotten Tomatoes** score (TMDB's
+score only as a fallback). Sources:
 
-## 🧠 Semantic search
+- **IMDb rating + votes:** IMDb's official daily dataset
+  (`title.ratings.tsv.gz`, free for personal/non-commercial use, cached in
+  `data/`). Much fresher than OMDb, which lags weeks behind on new releases.
+- **IMDb id + English title:** TMDB.
+- **Rotten Tomatoes:** [OMDb](https://www.omdbapi.com/apikey.aspx) (free key,
+  1,000 requests/day; add `OMDB_API_KEY=...` to `init.env`). RT only scores
+  movies its critics reviewed, so most Israeli and very new releases have none.
 
-1. Add `OPENAI_API_KEY=...` to `init.env` (uses `text-embedding-3-small`).
-2. Embed the movies: `python -m scraper.enrich` (only embeds movies without a vector; `--redo` re-embeds all).
-3. Query `GET /movies/search?q=funny family film` — results are ordered by cosine distance.
+Run `python -m scraper.ratings --all` once; the daily refresh keeps them
+current. Google user ratings are not included — Google offers no public API
+for movie ratings.
+
+Movies are sorted by **popularity** by default: the number of upcoming
+screenings (within the selected area and day), which is what Israeli cinemas
+are actually betting on this week.
 
 ## 🔎 API endpoints
 
@@ -153,8 +186,7 @@ Google offers no public API for movie ratings.
 | --- | --- |
 | `GET /movies?q=&now_showing=true&limit=&offset=` | Search/list movies (default: only those with upcoming showtimes) |
 | `GET /cities` | Cities with geocoded cinemas and their centre point |
-| `GET /movies?lat=&lng=&radius_km=` | Same filters on `/movies`, `/movies/search` and `/movies/{id}/showtimes`: only what shows within the radius |
-| `GET /movies/search?q=` | Semantic search (needs `OPENAI_API_KEY` + `python -m scraper.enrich`) |
+| `GET /movies?lat=&lng=&radius_km=` | Same filters on `/movies` and `/movies/{id}/showtimes`: only what shows within the radius |
 | `GET /movies/{id}` | Movie detail |
 | `GET /movies/{id}/showtimes?city=&date_from=&date_to=` | Upcoming screenings with cinema info |
 | `GET /cinemas?city=&chain=` | List cinemas |

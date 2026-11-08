@@ -31,11 +31,6 @@ class Settings(BaseSettings):
     # Free key (1,000 requests/day): https://www.omdbapi.com/apikey.aspx
     omdb_api_key: str = ""
 
-    # --- OpenAI (embeddings for semantic search) -----------------------------
-    # Must produce EMBEDDING_DIMENSIONS (1536) vectors, i.e. text-embedding-3-small.
-    openai_api_key: str = ""
-    openai_embedding_model: str = "text-embedding-3-small"
-
     # --- ScrapingAnt (residential proxy to bypass anti-bot protection) -------
     # ScrapingAnt "Proxy Mode" authenticates with the API key as the proxy
     # PASSWORD and the fixed username "scrapingant" (host :8080 = HTTP, :443 = HTTPS).
@@ -71,11 +66,6 @@ class Settings(BaseSettings):
     def has_omdb_api_key(self) -> bool:
         """True when an OMDb API key has been configured."""
         return bool(self.omdb_api_key)
-
-    @property
-    def has_openai_api_key(self) -> bool:
-        """True when an OpenAI API key has been configured."""
-        return bool(self.openai_api_key)
 
     @property
     def has_scrapingant_key(self) -> bool:

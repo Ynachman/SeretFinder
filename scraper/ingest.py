@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -24,6 +25,7 @@ from .indexer import ShowtimeRecord
 from .utils import parse_showtime_datetime
 
 logger = logging.getLogger(__name__)
+_HEBREW_RE = re.compile(r"[֐-׿]")
 
 
 def ingest_records(records: Iterable[ShowtimeRecord], session: Session) -> int:
@@ -100,10 +102,11 @@ def _get_or_create_movie(session: Session, record: ShowtimeRecord) -> Movie:
 
     if tmdb_id:
         movie.tmdb_id = tmdb_id
-    if tmdb.get("english_title"):
-        movie.english_title = tmdb["english_title"]
-    elif tmdb.get("english_title_hint") and not movie.english_title:
-        movie.english_title = tmdb["english_title_hint"]
+    # TMDB's he-IL search returns the *Hebrew* title in "title"; only accept
+    # genuinely non-Hebrew text here (scraper.ratings sets the real English title).
+    english = tmdb.get("english_title") or tmdb.get("english_title_hint") or ""
+    if english and not _HEBREW_RE.search(english) and not movie.english_title:
+        movie.english_title = english
     if tmdb.get("overview"):
         movie.overview = tmdb["overview"]
     if tmdb.get("poster_url"):

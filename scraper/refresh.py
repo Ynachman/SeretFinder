@@ -1,6 +1,6 @@
-"""Daily refresh: scrape -> ingest -> geocode -> ratings -> embeddings.
+"""Daily refresh: scrape -> ingest -> geocode -> ratings -> export site/data.json.
 
-Each step is isolated, so a failure in an optional step (ratings, embeddings)
+Each step is isolated, so a failure in an optional step (geocode, ratings)
 is logged and doesn't stop the others. Exit code is non-zero if the scrape
 produced nothing, so schedulers can flag a broken scraper.
 
@@ -17,7 +17,6 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from backend import models  # noqa: F401  (registers tables)
-from backend.config import get_settings
 from backend.database import Base, SessionLocal, engine, enable_vector_extension
 from backend.migrations import apply_migrations
 from backend.models import Showtime
@@ -48,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     Base.metadata.create_all(bind=engine)
     apply_migrations(engine)
 
-    logger.info("1/5 scraping seret.co.il")
+    logger.info("1/4 scraping seret.co.il")
     indexer = SeretIndexer(max_movies=args.max_movies, use_proxy=args.proxy)
     records = asyncio.run(indexer.run())
     if not records:
@@ -57,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
 
     session = SessionLocal()
     try:
-        logger.info("2/5 ingesting %d records", len(records))
+        logger.info("2/4 ingesting %d records", len(records))
         ingest_records(records, session)
 
         # Past showtimes are never shown; drop ones older than a week to keep the DB small.
@@ -66,21 +65,19 @@ def main(argv: list[str] | None = None) -> int:
         session.commit()
         logger.info("Pruned %d old showtimes", deleted)
 
-        from .enrich import embed_missing
         from .geocode import geocode_missing
         from .ratings import update_ratings
 
-        logger.info("3/5 geocoding new cinemas")
+        logger.info("3/4 geocoding new cinemas")
         _step("geocode", session, lambda: geocode_missing(session))
-        logger.info("4/5 ratings")
+        logger.info("4/4 ratings")
         _step("ratings", session, lambda: update_ratings(session))
-        if get_settings().has_openai_api_key:
-            logger.info("5/5 embeddings")
-            _step("embeddings", session, lambda: embed_missing(session))
-        else:
-            logger.info("5/5 embeddings skipped (no OPENAI_API_KEY)")
     finally:
         session.close()
+
+    from .export import export
+
+    export()
     logger.info("Refresh complete")
     return 0
 

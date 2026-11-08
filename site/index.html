@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>סרט פיינדר</title>
+<meta name="description" content="מה רץ בקולנוע לידך — שעות הקרנה, דירוגי IMDb ו-Rotten Tomatoes">
+<meta name="theme-color" content="#e8590c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preload" href="data.json" as="fetch" crossorigin>
+<link rel="preconnect" href="https://image.tmdb.org">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="סרט פיינדר">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #fff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e4e2dc;
+    --accent: #e8590c; --accent-ink: #fff; --chip: #efede7; --imdb: #9a6b00; --rt: #c8341a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151517; --card: #212125; --ink: #f2f2f3; --muted: #a0a0a8; --line: #33333a; --chip: #2c2c32; --imdb: #f5c518; --rt: #fa5a3c; }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line);
+           padding: calc(10px + env(safe-area-inset-top)) 16px 10px; }
+  .row { max-width: 1100px; margin: 0 auto; display: flex; gap: 8px; align-items: center; }
+  .row + .row { margin-top: 8px; }
+  .scroll { overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .scroll::-webkit-scrollbar { display: none; }
+  h1 { font-size: 19px; margin: 0; white-space: nowrap; }
+  input[type=search], select, button { font: inherit; font-size: 15px; border: 1px solid var(--line); border-radius: 999px;
+       padding: 7px 14px; background: var(--card); color: var(--ink); white-space: nowrap; flex: none; }
+  input[type=search] { flex: 1 1 auto; min-width: 0; border-radius: 12px; padding: 9px 14px; font-size: 16px; }
+  select { appearance: none; -webkit-appearance: none; padding-inline-end: 28px;
+           background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+           background-position: 14px 55%, 19px 55%; background-size: 5px 5px; background-repeat: no-repeat; }
+  button { cursor: pointer; touch-action: manipulation; }
+  .on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .sep { width: 1px; align-self: stretch; background: var(--line); flex: none; margin: 4px 2px; }
+  button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .radius { flex: 1; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; }
+  .radius[hidden] { display: none; }
+  .radius input { flex: 1 1 160px; max-width: 360px; accent-color: var(--accent); }
+  .radius output { min-width: 4.5em; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  main { max-width: 1100px; margin: 0 auto; padding: 14px 16px calc(24px + env(safe-area-inset-bottom)); }
+  .note { color: var(--muted); font-size: 14px; margin: 0 0 12px; min-height: 1.4em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .movie { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer;
+           text-align: start; padding: 0; display: block; width: 100%; color: inherit; font: inherit; white-space: normal;
+           content-visibility: auto; contain-intrinsic-size: 150px 340px; }
+  .movie:hover { border-color: var(--accent); }
+  .poster { aspect-ratio: 2/3; background: var(--chip); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 40px; }
+  .poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .meta { padding: 8px 10px 10px; }
+  .meta b { display: block; font-size: 15px; line-height: 1.3; }
+  .meta .en { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.3; margin-top: 2px; direction: ltr; text-align: right; }
+  .meta .count { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+           background: var(--chip); color: var(--ink); text-decoration: none; white-space: nowrap; direction: ltr; }
+  .badge small { color: var(--muted); font-weight: 400; }
+  .badge.imdb b { color: var(--imdb); }
+  .badge.rt b { color: var(--rt); }
+  .badges.big .badge { font-size: 15px; padding: 4px 12px; }
+  a.badge:hover { outline: 2px solid var(--accent); }
+  #detail[hidden], #list[hidden] { display: none; }
+  .back { margin-bottom: 12px; }
+  .hero { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .hero .poster { width: 130px; border-radius: 12px; overflow: hidden; flex: none; }
+  .hero > div:last-child { flex: 1 1 220px; }
+  .hero h2 { margin: 0; line-height: 1.25; }
+  .hero .en { color: var(--muted); direction: ltr; text-align: right; }
+  .hero p { margin: 10px 0 0; max-width: 60ch; color: var(--muted); }
+  .cinema { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .cinema h3 { margin: 0; font-size: 17px; }
+  .cinema .sub { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  .cinema .sub a { color: inherit; }
+  .day { display: flex; gap: 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); }
+  .day .d { width: 78px; flex: none; font-weight: 600; font-size: 14px; }
+  .times { display: flex; flex-wrap: wrap; gap: 6px; }
+  .t { background: var(--chip); border-radius: 8px; padding: 4px 9px; font-variant-numeric: tabular-nums; color: var(--ink); direction: ltr; }
+  .t small { color: var(--muted); }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+  footer { max-width: 1100px; margin: 0 auto; padding: 0 16px calc(20px + env(safe-area-inset-bottom)); color: var(--muted); font-size: 12.5px; }
+  @media (max-width: 560px) {
+    header { position: static; }
+    .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .day .d { width: 64px; font-size: 13px; }
+    .hero .poster { width: 110px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>🍿 סרט פיינדר</h1>
+    <input id="q" type="search" placeholder="חיפוש סרט…" aria-label="חיפוש סרט" enterkeyhint="search">
+  </div>
+  <div class="row scroll" role="toolbar" aria-label="סינון">
+    <select id="city" aria-label="עיר"><option value="">כל הערים</option></select>
+    <button id="near" type="button" aria-pressed="false">📍 קרוב אליי</button>
+    <span class="sep"></span>
+    <button type="button" class="day-btn" data-day="today">היום</button>
+    <button type="button" class="day-btn" data-day="tomorrow">מחר</button>
+    <button type="button" class="day-btn" data-day="week">כל השבוע</button>
+    <span class="sep"></span>
+    <select id="sort" aria-label="מיון">
+      <option value="popular">הכי פופולריים</option>
+      <option value="rating">דירוג IMDb</option>
+      <option value="title">לפי שם</option>
+    </select>
+  </div>
+  <div class="row">
+    <label class="radius" id="radiusWrap" hidden>
+      <span id="radiusLabel">רדיוס</span>
+      <input id="radius" type="range" min="1" max="100" value="10" aria-label="רדיוס בק״מ">
+      <output id="radiusOut" for="radius">10 ק״מ</output>
+    </label>
+  </div>
+</header>
+<main>
+  <section id="list">
+    <div class="note" id="note" role="status" aria-live="polite">טוען…</div>
+    <div class="grid" id="grid"></div>
+  </section>
+  <section id="detail" hidden aria-live="polite"></section>
+</main>
+<footer id="footer"></footer>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const TZ = "Asia/Jerusalem";
+const DAY = 86400000;
+// centre: where the radius is measured from (a city's centre, or the user's location).
+const state = { city: "", loc: null, centre: null, radius: 10, day: "week", sort: "popular" };
+const db = { movies: new Map(), cinemas: new Map(), shows: [], cities: new Map(), generatedAt: null };
+
+// --- Remembered preferences (best effort: storage can be unavailable) ----------
+const PREFS = "seretfinder.prefs";
+try { Object.assign(state, JSON.parse(localStorage.getItem(PREFS) || "{}")); } catch (e) {}
+function savePrefs() {
+  try { localStorage.setItem(PREFS, JSON.stringify({ city: state.city, radius: state.radius, day: state.day, sort: state.sort })); } catch (e) {}
+}
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const cityName = (c) => (c || "").replace(/-/g, " ");
+const norm = (s) => (s || "").toLowerCase().replace(/[֑-ׇ]/g, "").replace(/["'״׳\-–:]/g, " ").replace(/\s+/g, " ").trim();
+
+function km(aLat, aLng, bLat, bLng) {
+  const r = Math.PI / 180, dLat = (bLat - aLat) * r, dLng = (bLng - aLng) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLng / 2) ** 2;
+  return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+// --- Data ------------------------------------------------------------------------
+function ingest(data) {
+  db.generatedAt = new Date(data.generated_at);
+  db.movies = new Map(data.movies.map((m) => [m.id, m]));
+  db.cinemas = new Map(data.cinemas.map((c) => [c.id, c]));
+  db.shows = data.shows.map(([movie, cinema, t, screen]) => ({ movie, cinema, t: t * 1000, screen }));
+  // City centres = mean position of the city's geocoded cinemas.
+  const acc = new Map();
+  for (const c of db.cinemas.values()) {
+    if (!c.city || c.lat == null) continue;
+    const a = acc.get(c.city) || { lat: 0, lng: 0, n: 0 };
+    a.lat += c.lat; a.lng += c.lng; a.n++; acc.set(c.city, a);
+  }
+  db.cities = new Map([...acc].map(([city, a]) => [city, { lat: a.lat / a.n, lng: a.lng / a.n }]));
+}
+
+async function loadData() {
+  const r = await fetch("data.json", { cache: "no-cache" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+// --- Filters -------------------------------------------------------------------------
+function israelMidnight(daysAhead) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", timeZoneName: "longOffset" })
+    .formatToParts(new Date()).map((x) => [x.type, x.value]));
+  const off = (p.timeZoneName.match(/GMT([+-]\d{2}):?(\d{2})?/) || []);
+  const base = new Date(`${p.year}-${p.month}-${p.day}T00:00:00${off[1] ? off[1] + ":" + (off[2] || "00") : "+02:00"}`).getTime();
+  return base + daysAhead * DAY;
+}
+// "Today" runs until 04:00 so late screenings count as tonight (as seret.co.il lists them).
+function timeWindow() {
+  const now = Date.now();
+  if (state.day === "week") return [now, Infinity];
+  // Days run 04:00 -> 04:00. "Today" = from now until tonight's late shows end
+  // (after midnight that still includes the coming day, not just the next few hours).
+  const todayEnd = israelMidnight(0) + 4 * 3600000 + DAY;   // tomorrow 04:00
+  return state.day === "today" ? [now, todayEnd] : [todayEnd, todayEnd + DAY];
+}
+function inArea(cinemaId) {
+  if (!state.centre) return true;
+  const d = distOf(cinemaId);
+  return d != null && d <= state.radius;
+}
+const distCache = new Map();
+function distOf(cinemaId) {
+  if (!state.centre) return null;
+  if (!distCache.has(cinemaId)) {
+    const c = db.cinemas.get(cinemaId);
+    distCache.set(cinemaId, c && c.lat != null ? km(state.centre.lat, state.centre.lng, c.lat, c.lng) : null);
+  }
+  return distCache.get(cinemaId);
+}
+function matchingShows() {
+  const [from, to] = timeWindow();
+  return db.shows.filter((s) => s.t >= from && s.t < to && inArea(s.cinema));
+}
+const dayText = () => ({ today: "היום", tomorrow: "מחר", week: "" }[state.day]);
+const areaText = () => (state.centre ? `עד ${state.radius} ק״מ מ${state.centre.label}` : "");
+
+// --- Rendering helpers ----------------------------------------------------------------
+const poster = (m) => (m.poster ? `<img src="${esc(m.poster)}" alt="" loading="lazy" decoding="async">` : "🎬");
+const hasEnglish = (m) => m.en && m.en !== m.he;
+function badges(m, big) {
+  const out = [];
+  if (m.imdb != null) {
+    const votes = big && m.votes ? ` <small>(${m.votes.toLocaleString("en-US")})</small>` : "";
+    const inner = `IMDb <b>★ ${m.imdb.toFixed(1)}</b>${votes}`;
+    out.push(big && m.imdb_id
+      ? `<a class="badge imdb" href="https://www.imdb.com/title/${esc(m.imdb_id)}/" target="_blank" rel="noopener" title="לעמוד הסרט ב-IMDb">${inner}</a>`
+      : `<span class="badge imdb">${inner}</span>`);
+  }
+  if (m.rt != null) out.push(`<span class="badge rt" title="Rotten Tomatoes">🍅 <b>${m.rt}%</b></span>`);
+  if (m.tmdb && m.imdb == null && m.rt == null) out.push(`<span class="badge" title="דירוג משתמשי TMDB">TMDB <b>${m.tmdb.toFixed(1)}</b></span>`);
+  return out.length ? `<div class="badges${big ? " big" : ""}">${out.join("")}</div>` : "";
+}
+
+// --- List ------------------------------------------------------------------------------
+function renderList() {
+  const q = norm($("#q").value);
+  const counts = new Map();
+  for (const s of matchingShows()) counts.set(s.movie, (counts.get(s.movie) || 0) + 1);
+  let movies = [...counts.keys()].map((id) => db.movies.get(id)).filter(Boolean);
+  if (q) movies = movies.filter((m) => norm(m.he).includes(q) || norm(m.en).includes(q));
+  const byTitle = (a, b) => a.he.localeCompare(b.he, "he");
+  movies.sort({
+    popular: (a, b) => counts.get(b.id) - counts.get(a.id) || (b.votes || 0) - (a.votes || 0),
+    rating: (a, b) => (b.imdb ?? -1) - (a.imdb ?? -1) || (b.votes || 0) - (a.votes || 0) || byTitle(a, b),
+    title: byTitle,
+  }[state.sort] || byTitle);
+
+  const parts = [movies.length === 1 ? "סרט אחד" : `${movies.length} סרטים`, dayText(), areaText(), q ? `“${$("#q").value.trim()}”` : ""];
+  $("#note").textContent = movies.length ? parts.filter(Boolean).join(" · ") : "";
+  const when = dayText() ? " " + dayText() : "";
+  $("#grid").innerHTML = movies.length ? movies.map((m) => `
+    <button class="movie" data-id="${m.id}" type="button">
+      <div class="poster">${poster(m)}</div>
+      <div class="meta"><b>${esc(m.he)}</b>
+        ${hasEnglish(m) ? `<span class="en">${esc(m.en)}</span>` : ""}
+        ${badges(m, false)}
+        <div class="count">${counts.get(m.id)} הקרנות${when}</div>
+      </div></button>`).join("")
+    : `<div class="empty" style="grid-column:1/-1">לא נמצאו סרטים${dayText() ? " " + dayText() : ""}${state.centre ? " באזור — נסו להגדיל את הרדיוס" : ""}.</div>`;
+}
+
+// --- Detail (URL #movie/<id>, so the phone's back gesture returns to the list) --------
+function renderMovie(id) {
+  const m = db.movies.get(+id);
+  const d = $("#detail");
+  $("#list").hidden = true; d.hidden = false; window.scrollTo(0, 0);
+  if (!m) { d.innerHTML = `<button class="back" type="button" data-back>→ חזרה</button><div class="empty">הסרט כבר לא מוקרן.</div>`; return; }
+  document.title = `${m.he} · סרט פיינדר`;
+  const shows = matchingShows().filter((s) => s.movie === m.id);
+  const byCinema = new Map();
+  for (const s of shows) (byCinema.get(s.cinema) || byCinema.set(s.cinema, []).get(s.cinema)).push(s);
+  const groups = [...byCinema].map(([cid, list]) => ({ c: db.cinemas.get(cid), list }));
+  if (state.centre) groups.sort((a, b) => (distOf(a.c.id) ?? 1e9) - (distOf(b.c.id) ?? 1e9));
+  else groups.sort((a, b) => a.list[0].t - b.list[0].t);   // soonest first
+
+  const dayFmt = new Intl.DateTimeFormat("he-IL", { weekday: "short", day: "numeric", month: "numeric", timeZone: TZ });
+  const timeFmt = new Intl.DateTimeFormat("he-IL", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ });
+  // Group late-night shows (00:00-03:59) with the evening before, like the site does.
+  const dayKey = (t) => dayFmt.format(new Date(t - 4 * 3600000));
+
+  const showsHtml = !groups.length
+    ? `<div class="empty">אין הקרנות${dayText() ? " " + dayText() : " קרובות"}${state.centre ? " באזור שנבחר" : ""}.</div>`
+    : `<div class="note">${groups.length === 1 ? "בית קולנוע אחד" : `${groups.length} בתי קולנוע`}${state.centre ? ", הקרובים קודם" : ""}</div>` +
+      groups.map(({ c, list }) => {
+        const days = new Map();
+        for (const s of list) (days.get(dayKey(s.t)) || days.set(dayKey(s.t), []).get(dayKey(s.t))).push(s);
+        const dist = distOf(c.id) != null ? ` · ${distOf(c.id).toFixed(1)} ק״מ מ${state.centre.label}` : "";
+        const maps = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.name + " " + cityName(c.city))}`;
+        return `<div class="cinema"><h3>${esc(c.name)}</h3>
+          <div class="sub">${esc(cityName(c.city))}${dist} · <a href="${maps}" target="_blank" rel="noopener">ניווט</a></div>` +
+          [...days].map(([k, ds]) => `<div class="day"><div class="d">${esc(k)}</div><div class="times">` +
+            ds.map((s) => `<span class="t">${timeFmt.format(new Date(s.t))}${s.screen ? ` <small>${esc(s.screen)}</small>` : ""}</span>`).join("") +
+            `</div></div>`).join("") + `</div>`;
+      }).join("");
+
+  d.innerHTML = `<button class="back" type="button" data-back>→ חזרה לרשימה</button>
+    <div class="hero"><div class="poster">${poster(m)}</div>
+      <div><h2>${esc(m.he)}</h2>${hasEnglish(m) ? `<div class="en">${esc(m.en)}</div>` : ""}
+        ${badges(m, true)}${m.overview ? `<p>${esc(m.overview)}</p>` : ""}</div></div>
+    <div id="shows">${showsHtml}</div>`;
+}
+
+function showList() {
+  state.openedFromList = false;
+  document.title = "סרט פיינדר";
+  $("#detail").hidden = true; $("#detail").innerHTML = ""; $("#list").hidden = false;
+}
+
+function route() {
+  const m = location.hash.match(/^#movie\/(\d+)$/);
+  if (m) renderMovie(m[1]); else showList();
+}
+
+// Filters changed: re-render instantly (all data is local).
+function refresh() {
+  savePrefs();
+  renderList();
+  if (!$("#detail").hidden) route();
+}
+
+// --- Location / radius ------------------------------------------------------------------
+function setCentre() {
+  if (state.city && db.cities.has(state.city)) {
+    state.centre = { ...db.cities.get(state.city), label: cityName(state.city) };
+  } else if (state.loc) {
+    state.centre = { ...state.loc, label: "המיקום שלך" };
+  } else state.centre = null;
+  distCache.clear();
+  $("#radiusWrap").hidden = !state.centre;
+  $("#radiusLabel").textContent = state.centre ? `רדיוס מ${state.centre.label}` : "רדיוס";
+  refresh();
+}
+
+function useLocation() {
+  const btn = $("#near");
+  if (state.loc) {
+    state.loc = null; btn.classList.remove("on"); btn.setAttribute("aria-pressed", "false"); btn.textContent = "📍 קרוב אליי";
+    return setCentre();
+  }
+  if (!navigator.geolocation) { $("#note").textContent = "הדפדפן לא תומך באיתור מיקום."; return; }
+  btn.textContent = "מאתר…";
+  navigator.geolocation.getCurrentPosition((p) => {
+    state.loc = { lat: p.coords.latitude, lng: p.coords.longitude };
+    state.city = ""; $("#city").value = "";   // the location itself is the centre
+    btn.classList.add("on"); btn.setAttribute("aria-pressed", "true"); btn.textContent = "📍 קרוב אליי ✓";
+    setCentre();
+  }, () => {
+    btn.textContent = "📍 קרוב אליי";
+    $("#note").textContent = "לא קיבלנו הרשאת מיקום. אפשר לבחור עיר ידנית.";
+  }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 });
+}
+
+function syncControls() {
+  document.querySelectorAll(".day-btn").forEach((b) => {
+    const on = b.dataset.day === state.day; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on);
+  });
+  $("#sort").value = state.sort;
+  $("#radius").value = state.radius; $("#radiusOut").textContent = `${state.radius} ק״מ`;
+  $("#city").value = db.cities.has(state.city) ? state.city : "";
+}
+
+function renderFooter() {
+  if (!db.generatedAt) return;
+  const f = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: TZ });
+  const stale = Date.now() - db.generatedAt.getTime() > 2 * DAY ? " ⚠️ המידע לא עודכן כבר כמה ימים" : "";
+  $("#footer").textContent = `עודכן ${f.format(db.generatedAt)} · נתונים: seret.co.il, IMDb, Rotten Tomatoes, TMDB${stale}`;
+}
+
+function wire() {
+  let t;
+  $("#q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(renderList, 120); });
+  $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
+  $("#city").addEventListener("change", (e) => { state.city = e.target.value; setCentre(); });
+  $("#sort").addEventListener("change", (e) => { state.sort = e.target.value; refresh(); });
+  document.querySelectorAll(".day-btn").forEach((b) => b.addEventListener("click", () => { state.day = b.dataset.day; syncControls(); refresh(); }));
+  $("#radius").addEventListener("input", (e) => {
+    state.radius = +e.target.value; $("#radiusOut").textContent = `${state.radius} ק״מ`;
+    cancelAnimationFrame(t); t = requestAnimationFrame(refresh);
+  });
+  $("#near").addEventListener("click", useLocation);
+  $("#grid").addEventListener("click", (e) => {
+    const b = e.target.closest(".movie");
+    if (b) { state.openedFromList = true; location.hash = `movie/${b.dataset.id}`; }
+  });
+  $("#detail").addEventListener("click", (e) => {
+    if (!e.target.closest("[data-back]")) return;
+    // Opened from the list: go back in history (like the phone's back gesture).
+    if (state.openedFromList) history.back(); else location.hash = "";
+  });
+  window.addEventListener("hashchange", route);
+}
+
+async function init() {
+  wire();
+  syncControls();
+  try {
+    ingest(await loadData());
+  } catch (e) {
+    $("#note").textContent = "לא הצלחנו לטעון את רשימת הסרטים. בדקו את החיבור ונסו לרענן.";
+    return;
+  }
+  const cities = [...db.cities.keys()].sort((a, b) => a.localeCompare(b, "he"));
+  $("#city").insertAdjacentHTML("beforeend", cities.map((c) => `<option value="${esc(c)}">${esc(cityName(c))}</option>`).join(""));
+  if (!db.cities.has(state.city)) state.city = "";
+  syncControls();
+  renderFooter();
+  setCentre();   // renders the list
+  route();
+}
+init();
+
+// Offline support + instant launch from the home screen.
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>

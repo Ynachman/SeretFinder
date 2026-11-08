@@ -1,6 +1,9 @@
-"""FastAPI application entrypoint with CORS configuration.
+"""FastAPI app: the JSON API plus a local preview of the static web app.
 
-Run with: ``uvicorn backend.main:app --reload``
+The published app is fully static (``site/`` + ``site/data.json``, see
+``scraper.export``); this server just serves the same folder for local use.
+
+Run with: ``uvicorn backend.main:app --reload``  ->  http://127.0.0.1:8000/
 """
 from __future__ import annotations
 
@@ -11,7 +14,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401  (registers models on Base.metadata)
 from .api import router as api_router
@@ -20,7 +23,7 @@ from .database import Base, engine, enable_vector_extension
 from .migrations import apply_migrations
 
 settings = get_settings()
-STATIC_DIR = Path(__file__).parent / "static"
+SITE_DIR = Path(__file__).resolve().parent.parent / "site"
 
 
 @asynccontextmanager
@@ -53,13 +56,12 @@ app.add_middleware(
 app.include_router(api_router)
 
 
-@app.get("/", include_in_schema=False)
-async def root() -> FileResponse:
-    """Serve the web UI."""
-    return FileResponse(STATIC_DIR / "index.html")
-
-
 @app.get("/health")
 async def health() -> dict[str, str]:
     """Liveness probe for deployment health checks."""
     return {"status": "healthy"}
+
+
+# The static web app (registered last so API routes take precedence).
+# Run ``python -m scraper.export`` first to create site/data.json.
+app.mount("/", StaticFiles(directory=SITE_DIR, html=True), name="site")

@@ -226,13 +226,17 @@ def fetch_tmdb_metadata(hebrew_title: str, language: str = "he-IL") -> dict[str,
     if not settings.has_tmdb_api_key:
         return _placeholder_metadata(normalized, "TMDB API key is not configured")
 
-    for lang in (language, "en-US"):
-        movie = _tmdb_search(settings, normalized, lang)
-        if movie:
-            logger.info(
-                "TMDB match for %r (lang=%s): id=%s", normalized, lang, movie.get("id")
-            )
-            return _build_metadata(normalized, movie)
+    # Re-releases and special screenings carry a suffix ("שרק - חגיגות 25 שנה");
+    # if the full title has no match, retry with the part before " - ".
+    queries = [normalized]
+    if " - " in normalized:
+        queries.append(normalized.split(" - ", 1)[0].strip())
+    for query in queries:
+        for lang in (language, "en-US"):
+            movie = _tmdb_search(settings, query, lang)
+            if movie:
+                logger.info("TMDB match for %r (lang=%s): id=%s", query, lang, movie.get("id"))
+                return _build_metadata(normalized, movie)
 
     logger.info("No TMDB match found for %r", normalized)
     return _placeholder_metadata(normalized, "no TMDB match")
@@ -307,7 +311,8 @@ def _tmdb_search(settings: Settings, query: str, language: str) -> Optional[dict
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        logger.warning("TMDB request failed (lang=%s): %s", language, exc)
+        # Type only: the exception text can contain the request URL, which carries the API key.
+        logger.warning("TMDB request failed (lang=%s): %s", language, type(exc).__name__)
         return None
 
     results = (response.json() or {}).get("results") or []
