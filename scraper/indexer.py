@@ -162,6 +162,7 @@ class SeretIndexer:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._dumped_no_title = False
 
     # --- Configuration helpers -----------------------------------------------------
     @staticmethod
@@ -306,6 +307,10 @@ class SeretIndexer:
         if not hebrew_title:
             logger.warning("No Hebrew title found on %s; using placeholder", movie_url)
             hebrew_title = "Unknown Title"
+            # Save the first such page: it's usually a block/challenge page.
+            if not self._dumped_no_title:
+                self._dumped_no_title = True
+                await self._dump_debug("movie_no_title")
         hebrew_title = normalize_hebrew_title(hebrew_title)
 
         # Primary path: the raw AJAX endpoint is what actually powers the on-page
