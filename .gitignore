@@ -24,3 +24,6 @@ logs/
 data/
 site/data.json
 site/data.tmp
+
+# Local editor/tool settings
+.claude/
