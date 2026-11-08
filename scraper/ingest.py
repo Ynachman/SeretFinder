@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from datetime import datetime, timezone
 import re
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -28,8 +29,11 @@ logger = logging.getLogger(__name__)
 _HEBREW_RE = re.compile(r"[֐-׿]")
 
 
-def ingest_records(records: Iterable[ShowtimeRecord], session: Session) -> int:
+def ingest_records(records: Iterable[ShowtimeRecord], session: Session, prune: bool = False) -> int:
     """Upsert ``records`` into the database. Returns the count of showtimes written.
+
+    With ``prune=True`` (only for a *complete* scrape of all movies), upcoming
+    showtimes missing from ``records`` are deleted as cancelled.
 
     Never raises for a single bad record: parsing/DB errors on one record are
     logged and skipped so the rest of the batch still lands.
@@ -41,6 +45,8 @@ def ingest_records(records: Iterable[ShowtimeRecord], session: Session) -> int:
     #: Existing showtime -> row, loaded lazily once per movie.
     slots: dict[tuple, Showtime] = {}
     loaded_movies: set[int] = set()
+    #: Every slot present in this scrape (for removing cancelled screenings).
+    seen: set[tuple] = set()
 
     for record in records:
         try:
@@ -65,6 +71,7 @@ def ingest_records(records: Iterable[ShowtimeRecord], session: Session) -> int:
                 slots[(st.movie_id, st.cinema_id, st.starts_at, st.screen)] = st
 
         key = (movie.id, cinema.id, starts_at, record.screen)
+        seen.add(key)
         existing = slots.get(key)
         if existing is not None:
             existing.booking_url = record.booking_url or existing.booking_url
@@ -82,7 +89,40 @@ def ingest_records(records: Iterable[ShowtimeRecord], session: Session) -> int:
 
     session.commit()
     logger.info("Ingested %d new showtimes", written)
+    if prune:
+        remove_cancelled(session, seen)
     return written
+
+
+#: Refuse to prune when a scrape has fewer slots than this share of the
+#: upcoming showtimes already stored: it's probably a partial/failed scrape.
+MIN_SCRAPE_SHARE = 0.6
+
+
+def remove_cancelled(session: Session, seen: set[tuple]) -> int:
+    """Delete upcoming showtimes that the latest *full* scrape no longer lists.
+
+    Covers screenings the site cancelled/rescheduled and movies that left the
+    listings. Only future screenings are touched (past ones are pruned by age
+    elsewhere), and nothing is deleted if the scrape looks incomplete.
+    """
+    now = datetime.now(timezone.utc)
+    upcoming = session.query(Showtime).filter(Showtime.starts_at > now).all()
+    if not upcoming:
+        return 0
+    seen_upcoming = sum(1 for k in seen if k[2] > now)
+    if seen_upcoming < MIN_SCRAPE_SHARE * len(upcoming):
+        logger.warning(
+            "Not removing cancelled screenings: scrape has %d upcoming slots vs %d stored "
+            "(looks incomplete).", seen_upcoming, len(upcoming),
+        )
+        return 0
+    stale = [st for st in upcoming if (st.movie_id, st.cinema_id, st.starts_at, st.screen) not in seen]
+    for st in stale:
+        session.delete(st)
+    session.commit()
+    logger.info("Removed %d cancelled/no-longer-listed showtimes", len(stale))
+    return len(stale)
 
 
 def _get_or_create_movie(session: Session, record: ShowtimeRecord) -> Movie:

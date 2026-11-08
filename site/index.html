@@ -393,6 +393,8 @@ function wire() {
   window.addEventListener("hashchange", route);
 }
 
+let lastLoaded = 0;   // when data.json was last loaded (see visibilitychange below)
+
 async function init() {
   wire();
   syncControls();
@@ -409,8 +411,23 @@ async function init() {
   renderFooter();
   setCentre();   // renders the list
   route();
+  lastLoaded = Date.now();
 }
 init();
+
+// Phones keep apps alive in the background for days: when the app comes back
+// to the foreground after a while, pick up the newest data and re-render.
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible" || !lastLoaded || Date.now() - lastLoaded < 3 * 3600000) return;
+  try {
+    ingest(await loadData());
+    lastLoaded = Date.now();
+    distCache.clear();
+    renderFooter();
+    renderList();
+    if (!$("#detail").hidden) route();
+  } catch (e) { /* offline: keep showing what we have */ }
+});
 
 // Offline support + instant launch from the home screen.
 if ("serviceWorker" in navigator && location.protocol === "https:") {

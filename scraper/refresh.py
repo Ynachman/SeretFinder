@@ -23,6 +23,7 @@ from backend.database import Base, SessionLocal, engine, enable_vector_extension
 from backend.migrations import apply_migrations
 from backend.models import Showtime
 
+from .http_scraper import ScrapeBlocked, SeretHttpScraper
 from .indexer import SeretIndexer
 from .ingest import ingest_records
 
@@ -57,7 +58,9 @@ def _publish() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the full daily refresh.")
     parser.add_argument("--max-movies", type=int, help="Cap movies scraped (testing).")
-    parser.add_argument("--proxy", action="store_true", help="Use the ScrapingAnt proxy (off by default).")
+    parser.add_argument("--browser", action="store_true",
+                        help="Use the Playwright (headless Chrome) scraper instead of plain HTTP.")
+    parser.add_argument("--proxy", action="store_true", help="With --browser: use the ScrapingAnt proxy.")
     parser.add_argument(
         "--publish", action="store_true",
         help="Afterwards, trigger the GitHub 'Publish' workflow (needs the gh CLI, logged in).",
@@ -69,9 +72,16 @@ def main(argv: list[str] | None = None) -> int:
     Base.metadata.create_all(bind=engine)
     apply_migrations(engine)
 
-    logger.info("1/4 scraping seret.co.il")
-    indexer = SeretIndexer(max_movies=args.max_movies, use_proxy=args.proxy)
-    records = asyncio.run(indexer.run())
+    logger.info("1/4 scraping seret.co.il (%s)", "browser" if args.browser else "http")
+    if args.browser:
+        indexer = SeretIndexer(max_movies=args.max_movies, use_proxy=args.proxy)
+        records = asyncio.run(indexer.run())
+    else:
+        try:
+            records = SeretHttpScraper(max_movies=args.max_movies).run()
+        except ScrapeBlocked as exc:
+            logger.error("Scrape blocked: %s", exc)
+            records = []
     if not records:
         logger.error("Scrape returned no showtimes; leaving existing data untouched.")
         return 1
@@ -79,7 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     session = SessionLocal()
     try:
         logger.info("2/4 ingesting %d records", len(records))
-        ingest_records(records, session)
+        # A complete scrape also removes screenings the site no longer lists.
+        ingest_records(records, session, prune=args.max_movies is None)
 
         # Past showtimes are never shown; drop ones older than a week to keep the DB small.
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)

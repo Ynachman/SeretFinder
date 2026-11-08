@@ -122,26 +122,27 @@ itself, so it opens instantly from a CDN with no server to wake up, and a
 service worker makes it launch instantly (and work offline) from the home
 screen.
 
-**Who does what:** seret.co.il sits behind Cloudflare, which shows a bot
-check to cloud/datacenter IPs (including GitHub's runners), so **your PC does
-the scraping** and GitHub only publishes:
+**Everything runs on GitHub — no PC needed.** `.github/workflows/publish.yml`
+runs twice a day (~06:00 and ~18:00 Israel time): scrape seret.co.il over
+plain HTTP (`scraper.http_scraper`, ~2 minutes) → update Neon (new screenings
+added, cancelled ones removed) → ratings → export → deploy. If a scrape ever
+fails, the last data stays published and the app's footer warns once it is
+more than two days old. Seret lists about a week ahead, so a missed run is
+harmless.
 
-- Your PC (daily scheduled task): scrape → Neon → ratings → then triggers the
-  GitHub **Publish** workflow (`python -m scraper.refresh --publish`).
-- GitHub (`.github/workflows/publish.yml`): export Neon → `data.json` → deploy
-  to Pages. It also runs every morning by itself, so past showtimes drop off
-  even on days the PC was off. Seret lists about a week ahead, so a missed day
-  or two is harmless; the app's footer warns once data is >2 days old.
+(Cloudflare in front of seret.co.il shows a bot check to *headless browsers*
+on cloud machines, but serves plain HTTP requests normally — that's why the
+default scraper doesn't use a browser. The Playwright scraper remains
+available locally via `python -m scraper.refresh --browser`.)
 
 One-time setup:
 
 1. Push this repo to GitHub. GitHub Pages is free for **public** repositories
    (`init.env` is gitignored, so no secrets are published).
-2. Repo **Settings → Secrets and variables → Actions**: add `DATABASE_URL`.
+2. Repo **Settings → Secrets and variables → Actions**: add `DATABASE_URL`,
+   `TMDB_API_KEY` and `OMDB_API_KEY`.
 3. Repo **Settings → Pages → Source: GitHub Actions**.
-4. On the PC: install and log in to the GitHub CLI (`winget install GitHub.cli`,
-   then `gh auth login`), and schedule the daily scrape:
-   `powershell -ExecutionPolicy Bypass -File .\scripts\schedule_daily_refresh.ps1`
+4. **Actions → Publish → Run workflow** for the first run.
 
 The app is then at `https://<user>.github.io/<repo>/`. Friends open the link
 and use **Share → Add to Home Screen** (iPhone) or **⋮ → Install app**
