@@ -41,6 +41,19 @@ SLOT_DATE_RE = SeretIndexer.SLOT_DATE_RE
 DELAY_S = 0.4
 
 
+_CHARSET_RE = re.compile(rb"""<meta[^>]+charset=["']?([\w-]+)""", re.I)
+#: Hebrew mis-decoded with a Cyrillic/Central-European codepage looks like this.
+_MOJIBAKE_RE = re.compile(r"[Ѐ-ӿ]")
+
+
+def _charset(resp: requests.Response) -> str:
+    header = re.search(r"charset=([\w-]+)", resp.headers.get("content-type", ""), re.I)
+    if header:
+        return header.group(1)
+    meta = _CHARSET_RE.search(resp.content[:5000])
+    return meta.group(1).decode("ascii") if meta else "windows-1255"
+
+
 class ScrapeBlocked(RuntimeError):
     """The site answered with a bot-check page instead of content."""
 
@@ -80,9 +93,11 @@ class SeretHttpScraper:
                 raise
         else:  # pragma: no cover - loop always breaks or raises
             raise last_exc or RuntimeError("unreachable")
-        # Pages declare their own charset (the index is windows-1255, others
-        # UTF-8); let BeautifulSoup read the <meta> instead of trusting requests.
-        soup = BeautifulSoup(resp.content, "html.parser")
+        # Seret serves Hebrew as windows-1255. The showtime (AJAX) responses
+        # declare it only in the HTTP header, with no <meta>, and charset
+        # *guessing* gets ~20% of them wrong (Hebrew -> Cyrillic garbage), so
+        # never guess: header charset, else the page's <meta>, else cp1255.
+        soup = BeautifulSoup(resp.content, "html.parser", from_encoding=_charset(resp))
         title = soup.title.get_text(strip=True) if soup.title else ""
         if "Just a moment" in title or soup.select_one("#challenge-form, .cf-turnstile"):
             raise ScrapeBlocked(f"bot check served for {url}")
@@ -145,6 +160,8 @@ class SeretHttpScraper:
                     continue
                 m = SLOT_DATE_RE.search(slot.get("title") or "")
                 href = slot.get("href") if slot.name == "a" else None
+                if _MOJIBAKE_RE.search(f"{title} {cinema} {city}"):
+                    raise ValueError(f"garbled text (encoding problem): {cinema!r}")
                 records.append(ShowtimeRecord(
                     movie_title=title,
                     cinema_name=cinema,

@@ -120,8 +120,21 @@ def remove_cancelled(session: Session, seen: set[tuple]) -> int:
     stale = [st for st in upcoming if (st.movie_id, st.cinema_id, st.starts_at, st.screen) not in seen]
     for st in stale:
         session.delete(st)
+    session.flush()
+    # Cinemas left with no screenings at all (closed, renamed, or bad rows) go
+    # too; a cinema that comes back is simply re-created and re-geocoded.
+    empty = (
+        session.query(Cinema)
+        .filter(~session.query(Showtime).filter(Showtime.cinema_id == Cinema.id).exists())
+        .all()
+    )
+    for cinema in empty:
+        session.delete(cinema)
     session.commit()
-    logger.info("Removed %d cancelled/no-longer-listed showtimes", len(stale))
+    logger.info(
+        "Removed %d cancelled/no-longer-listed showtimes and %d cinemas with none left",
+        len(stale), len(empty),
+    )
     return len(stale)
 
 
