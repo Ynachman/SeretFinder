@@ -27,7 +27,7 @@ $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { throw "Missing $python - create the venv first (see README)." }
 New-Item -ItemType Directory -Force (Join-Path $root "logs") | Out-Null
 
-$cmd = "& '$python' -m scraper.refresh *>> 'logs\refresh.log'"
+$cmd = "& '$python' -m scraper.refresh --publish *>> 'logs\refresh.log'"
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`"" -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -Daily -At $At

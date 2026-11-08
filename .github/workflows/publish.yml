@@ -1,18 +1,21 @@
-# Daily: scrape seret.co.il -> update Neon -> export site/data.json -> publish
-# the static app to GitHub Pages (free, global CDN, no server to wake up).
+# Publish the static app to GitHub Pages (free, global CDN, no server to wake up).
 #
-# Needs repository secrets (Settings -> Secrets and variables -> Actions):
-#   DATABASE_URL   Neon connection string (postgresql+psycopg2://...)
-#   TMDB_API_KEY   TMDB key
-#   OMDB_API_KEY   OMDb key (Rotten Tomatoes; optional)
-# and Settings -> Pages -> Source = "GitHub Actions".
-name: Refresh & publish
+# Scraping does NOT happen here: seret.co.il's Cloudflare shows a bot check to
+# cloud/datacenter IPs such as GitHub's runners. Your PC scrapes instead
+# (python -m scraper.refresh --publish, via scripts/schedule_daily_refresh.ps1),
+# writes to Neon, and then triggers this workflow, which exports Neon ->
+# site/data.json and deploys. It also runs daily on its own so past showtimes
+# drop off even on days the PC was off.
+#
+# Needs repository secret DATABASE_URL (Settings -> Secrets and variables ->
+# Actions) and Settings -> Pages -> Source = "GitHub Actions".
+name: Publish
 
 on:
   schedule:
-    - cron: "0 3 * * *"        # 03:00 UTC = 05:00/06:00 in Israel
-  workflow_dispatch:            # "Run workflow" button for a manual refresh
-  push:                         # app changes: republish without re-scraping
+    - cron: "30 4 * * *"       # 04:30 UTC = 06:30/07:30 in Israel
+  workflow_dispatch:            # triggered by the PC after each scrape (or by hand)
+  push:                         # app changes: republish
     branches: [main, master]
     paths: ["site/**", "scraper/export.py", ".github/workflows/publish.yml"]
 
@@ -28,11 +31,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-      OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
@@ -45,26 +46,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Install Chromium for Playwright
-        if: github.event_name != 'push'
-        run: python -m playwright install --with-deps chromium
-
-      - name: Scrape, ingest, geocode, ratings
-        if: github.event_name != 'push'
-        # If the site blocks this run, still publish the existing data below;
-        # the app shows a "not updated" warning once data is >2 days old.
-        continue-on-error: true
-        run: python -m scraper.refresh
-
-      - name: Keep scraper debug pages (if any)
-        if: always() && hashFiles('debug/**') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: scraper-debug
-          path: debug/
-          retention-days: 7
-
-      - name: Export site/data.json
+      - name: Export site/data.json from Neon
         run: python -m scraper.export
 
       - uses: actions/configure-pages@v5

@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -36,10 +38,30 @@ def _step(name: str, session, fn) -> None:
         logger.error("Step %r failed: %s", name, type(exc).__name__)
 
 
+def _publish() -> None:
+    """Ask GitHub to rebuild the site from Neon (see .github/workflows/publish.yml)."""
+    gh = shutil.which("gh")
+    if not gh:
+        logger.error("--publish: the gh CLI isn't installed/on PATH; site not republished.")
+        return
+    result = subprocess.run(
+        [gh, "workflow", "run", "publish.yml", "--ref", "master"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode == 0:
+        logger.info("Triggered the GitHub Publish workflow; the site updates in ~1 minute.")
+    else:
+        logger.error("Could not trigger the Publish workflow: %s", (result.stderr or result.stdout).strip())
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the full daily refresh.")
     parser.add_argument("--max-movies", type=int, help="Cap movies scraped (testing).")
     parser.add_argument("--proxy", action="store_true", help="Use the ScrapingAnt proxy (off by default).")
+    parser.add_argument(
+        "--publish", action="store_true",
+        help="Afterwards, trigger the GitHub 'Publish' workflow (needs the gh CLI, logged in).",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -78,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     from .export import export
 
     export()
+    if args.publish:
+        _publish()
     logger.info("Refresh complete")
     return 0
 
