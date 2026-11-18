@@ -1,4 +1,4 @@
-# Twice daily, entirely on GitHub (no PC needed):
+# Three times a day, entirely on GitHub (no PC needed):
 #   scrape seret.co.il (plain HTTP, ~2 min) -> update Neon (adds new screenings,
 #   removes cancelled ones) -> ratings -> export site/data.json -> GitHub Pages.
 #
@@ -11,8 +11,12 @@ name: Publish
 
 on:
   schedule:
-    - cron: "0 4 * * *"        # ~06:00/07:00 in Israel
-    - cron: "0 16 * * *"       # ~18:00/19:00 in Israel
+    # Three times a day. GitHub starts scheduled runs late (often hours late at
+    # :00, its busiest minute), so use odd minutes; seret posts the new week
+    # around Wednesday evening, and three runs pick it up within a few hours.
+    - cron: "23 3 * * *"       # ~05:23 Israel (winter)
+    - cron: "23 11 * * *"      # ~13:23
+    - cron: "23 18 * * *"      # ~20:23
   workflow_dispatch:            # "Run workflow" button (or: gh workflow run publish.yml)
   push:                         # app changes: republish without re-scraping
     branches: [main, master]

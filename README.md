@@ -123,7 +123,7 @@ service worker makes it launch instantly (and work offline) from the home
 screen.
 
 **Everything runs on GitHub — no PC needed.** `.github/workflows/publish.yml`
-runs twice a day (~06:00 and ~18:00 Israel time): scrape seret.co.il over
+runs three times a day (~05:30, ~13:30 and ~20:30 Israel time; GitHub may start scheduled runs late): scrape seret.co.il over
 plain HTTP (`scraper.http_scraper`, ~2 minutes) → update Neon (new screenings
 added, cancelled ones removed) → ratings → export → deploy. If a scrape ever
 fails, the last data stays published and the app's footer warns once it is
